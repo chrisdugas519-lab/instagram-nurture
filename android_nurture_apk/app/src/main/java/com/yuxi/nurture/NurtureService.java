@@ -39,8 +39,8 @@ public class NurtureService extends AccessibilityService {
         String kwStr = intent.getStringExtra("keywords");
         keywords = kwStr != null ? kwStr.split(",") : new String[]{"爱马仕包包"};
         likeProb = intent.getIntExtra("likeProb", 60);
-        viewMin = intent.getIntExtra("viewMin", 5);
-        viewMax = intent.getIntExtra("viewMax", 15);
+        viewMin = intent.getIntExtra("viewMin", 10);
+        viewMax = intent.getIntExtra("viewMax", 25);
         duration = intent.getIntExtra("duration", 10);
 
         screenW = getResources().getDisplayMetrics().widthPixels;
@@ -322,10 +322,12 @@ public class NurtureService extends AccessibilityService {
 
         for (int i = 0; i < times; i++) {
             if (isAdPresent()) {
-                log("  ⚠️ 检测到广告，跳过");
-                continue;
+                log("  ⚠️ 检测到广告，稍作停留...");
+                randomSleep(3, 5); // 看到广告也停几秒，不像机器人立刻划走
             }
             swipeUp(randInt(200, 400));
+            log("  ⏳ 等待内容加载...");
+            sleep(2000); // 滑动后给 2 秒加载缓冲
             randomSleep(viewMin, viewMax);
 
             // 误触检测
