@@ -120,25 +120,66 @@ public class NurtureService extends AccessibilityService {
     private boolean openInstagram() {
         log("📱 打开 Instagram...");
 
-        Intent launch = getPackageManager().getLaunchIntentForPackage("com.instagram.android");
-        if (launch == null) {
-            log("  ❌ 未找到 Instagram (包名: com.instagram.android)");
-            return false;
+        String targetPackage = null;
+
+        // 1. 首选标准包名
+        Intent stdLaunch = getPackageManager().getLaunchIntentForPackage("com.instagram.android");
+        if (stdLaunch != null) {
+            targetPackage = "com.instagram.android";
         }
 
+        // 2. 如果没找到，遍历所有已安装包
+        if (targetPackage == null) {
+            try {
+                List<android.content.pm.PackageInfo> pkgs = getPackageManager().getInstalledPackages(0);
+                for (android.content.pm.PackageInfo pi : pkgs) {
+                    String pkg = pi.packageName.toLowerCase();
+                    if (pkg.contains("instagram") && !pkg.contains("installer")) {
+                        Intent li = getPackageManager().getLaunchIntentForPackage(pi.packageName);
+                        if (li != null) {
+                            targetPackage = pi.packageName;
+                            log("  🔍 发现 Instagram 包名: " + targetPackage);
+                            break;
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                log("  ⚠️ 扫描包列表异常: " + e.getMessage());
+            }
+        }
+
+        if (targetPackage == null) {
+            log("  ❌ 未找到 Instagram，尝试网页启动...");
+            // 3. Fallback：通过浏览器打开 Instagram
+            handler.post(() -> {
+                try {
+                    Intent browserIntent = new Intent(Intent.ACTION_VIEW,
+                        android.net.Uri.parse("https://www.instagram.com/"));
+                    browserIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    startActivity(browserIntent);
+                    log("  🟢 已通过浏览器启动 Instagram");
+                } catch (Exception e) {
+                    log("  ❌ 浏览器启动也失败: " + e.getMessage());
+                }
+            });
+            sleep(8000);
+            return true;
+        }
+
+        Intent launch = getPackageManager().getLaunchIntentForPackage(targetPackage);
         launch.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
 
         // 在主线程启动 Activity，避免后台线程限制
         handler.post(() -> {
             try {
                 startActivity(launch);
-                log("  🟢 startActivity 已调用");
+                log("  🟢 startActivity 已调用 (包名: " + targetPackage + ")");
             } catch (Exception e) {
                 log("  ❌ startActivity 异常: " + e.getMessage());
             }
         });
 
-        // 等待 Instagram 启动（增加等待时间）
+        // 等待 Instagram 启动
         sleep(randInt(5000, 7000));
 
         // 循环检测是否已打开
