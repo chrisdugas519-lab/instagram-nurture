@@ -1,21 +1,20 @@
 package com.yuxi.nurture;
 
+import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.provider.Settings;
-import android.text.Editable;
-import android.text.TextWatcher;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.RadioGroup;
 import android.widget.ScrollView;
 import android.widget.SeekBar;
 import android.widget.TextView;
-import android.widget.Toast;
 
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
@@ -31,6 +30,7 @@ public class MainActivity extends AppCompatActivity {
 
     private Handler uiHandler = new Handler(Looper.getMainLooper());
     public static MainActivity instance;
+    private BroadcastReceiver logReceiver;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -40,6 +40,16 @@ public class MainActivity extends AppCompatActivity {
 
         initViews();
         loadConfig();
+
+        // 注册日志广播接收器
+        logReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                String msg = intent.getStringExtra("msg");
+                if (msg != null) appendLog(msg);
+            }
+        };
+        registerReceiver(logReceiver, new IntentFilter("com.yuxi.nurture.LOG"), Context.RECEIVER_EXPORTED);
 
         btnStart.setOnClickListener(v -> {
             if (!isAccessibilityServiceEnabled()) {
@@ -143,8 +153,8 @@ public class MainActivity extends AppCompatActivity {
         etKeywords.setText(sp.getString("keywords", "爱马仕包包,Hermès bag,luxury leather bag"));
         sbLikeProb.setProgress(sp.getInt("likeProb", 60));
         tvLikeProb.setText(sbLikeProb.getProgress() + "%");
-        etViewMin.setText(String.valueOf(sp.getInt("viewMin", 5)));
-        etViewMax.setText(String.valueOf(sp.getInt("viewMax", 15)));
+        etViewMin.setText(String.valueOf(sp.getInt("viewMin", 10)));
+        etViewMax.setText(String.valueOf(sp.getInt("viewMax", 25)));
         etDuration.setText(String.valueOf(sp.getInt("duration", 10)));
     }
 
@@ -161,5 +171,13 @@ public class MainActivity extends AppCompatActivity {
             tvLog.setText(text + "\n" + msg);
             scrollLog.fullScroll(ScrollView.FOCUS_DOWN);
         });
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        if (logReceiver != null) {
+            unregisterReceiver(logReceiver);
+        }
     }
 }

@@ -84,10 +84,15 @@ public class NurtureService extends AccessibilityService {
                 return;
             }
 
+            // 先确保在首页
+            navigateToHome();
+
             if ("feed".equals(mode)) {
                 scrollFeed(0);
                 for (int i = 0; i < randInt(1, 3); i++) {
+                    if (!isRunning) return;
                     if (random.nextInt(100) < likeProb) likePost();
+                    if (!isRunning) return;
                     scrollFeed(1);
                 }
             } else if ("reels".equals(mode)) {
@@ -100,9 +105,13 @@ public class NurtureService extends AccessibilityService {
                 java.util.Collections.shuffle(actions);
                 int num = randInt(2, 3);
                 for (int i = 0; i < num; i++) {
+                    if (!isRunning) return;
                     String action = actions.get(i);
                     log("--- " + action.toUpperCase() + " ---");
-                    if ("feed".equals(action)) scrollFeed(0);
+                    if ("feed".equals(action)) {
+                        navigateToHome();
+                        scrollFeed(0);
+                    }
                     else watchReels(0);
                     randomSleep(3, 8);
                 }
@@ -196,6 +205,21 @@ public class NurtureService extends AccessibilityService {
         log("🔴 关闭 Instagram...");
         performGlobalAction(GLOBAL_ACTION_HOME);
         sleep(randInt(1000, 2000));
+    }
+
+    // 导航到首页（确保不在探索/推荐页）
+    private void navigateToHome() {
+        log("🏠 导航到首页...");
+        // 尝试找 Home 图标（底部导航第一个）
+        AccessibilityNodeInfo home = findByDesc("Home");
+        if (home == null) home = findByDesc("首页");
+        if (home == null) {
+            // 兜底：点击底部导航最左侧位置
+            smartTap((int)(screenW * 0.10), (int)(screenH * 0.95), "首页兜底");
+        } else {
+            smartClickNode(home, "首页");
+        }
+        sleep(randInt(2000, 3000));
     }
 
     // ============ UI 查找（AccessibilityNodeInfo） ============
@@ -321,14 +345,16 @@ public class NurtureService extends AccessibilityService {
         log("📜 滚动信息流 " + times + " 次...");
 
         for (int i = 0; i < times; i++) {
+            if (!isRunning) return;
             if (isAdPresent()) {
                 log("  ⚠️ 检测到广告，稍作停留...");
-                randomSleep(3, 5); // 看到广告也停几秒，不像机器人立刻划走
+                interruptibleSleep(3, 5);
             }
             swipeUp(randInt(200, 400));
             log("  ⏳ 等待内容加载...");
-            sleep(2000); // 滑动后给 2 秒加载缓冲
-            randomSleep(viewMin, viewMax);
+            interruptibleSleep(2, 2); // 滑动后给 2 秒加载缓冲
+            if (!isRunning) return;
+            interruptibleSleep(viewMin, viewMax);
 
             // 误触检测
             if (!isInInstagram()) {
@@ -336,6 +362,19 @@ public class NurtureService extends AccessibilityService {
                 pressBack();
                 sleep(1000);
             }
+        }
+    }
+
+    // 可中断的睡眠：每 1 秒检查一次 isRunning
+    private void interruptibleSleep(int minSec, int maxSec) {
+        int totalMs = minSec * 1000;
+        if (maxSec > minSec) {
+            totalMs += random.nextInt((maxSec - minSec) * 1000 + 1);
+        }
+        long start = System.currentTimeMillis();
+        while (System.currentTimeMillis() - start < totalMs) {
+            if (!isRunning) return;
+            sleep(1000); // 1秒检查一次
         }
     }
 
@@ -368,18 +407,20 @@ public class NurtureService extends AccessibilityService {
         sleep(randInt(2000, 3000));
 
         for (int i = 0; i < count; i++) {
+            if (!isRunning) return;
             int dur = randInt(viewMin, viewMax);
             log("  📹 观看第 " + (i+1) + " 个 Reel " + dur + "秒...");
-            sleep(dur * 1000);
+            interruptibleSleep(dur, dur);
+            if (!isRunning) return;
 
             if (random.nextInt(100) < likeProb) {
                 smartTap(screenW/2 + randInt(-50, 50), screenH/2 + randInt(-50, 50), "点赞");
-                sleep(500);
+                interruptibleSleep(1, 1);
             }
 
             if (i < count - 1) {
                 swipeXY(screenW/2, (int)(screenH*0.7), screenW/2, (int)(screenH*0.25), randInt(300, 500));
-                sleep(randInt(1000, 2000));
+                interruptibleSleep(2, 3); // 加载下一个 Reel 的缓冲
             }
         }
         pressBack();
@@ -420,7 +461,13 @@ public class NurtureService extends AccessibilityService {
 
     private void log(String msg) {
         Log.d("NurtureService", msg);
-        // 这里可以通过广播或 SharedPreferences 把日志传给 MainActivity
-        // 简化版：先只输出到 logcat
+        // 发送广播，让 MainActivity 显示日志
+        try {
+            android.content.Intent intent = new android.content.Intent("com.yuxi.nurture.LOG");
+            intent.putExtra("msg", msg);
+            sendBroadcast(intent);
+        } catch (Exception e) {
+            // ignore
+        }
     }
 }
