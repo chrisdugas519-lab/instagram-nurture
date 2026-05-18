@@ -32,13 +32,6 @@
             android:checked="true" />
 
         <RadioButton
-            android:id="@+id/rb_search"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="@string/mode_search" />
-
-        <RadioButton
             android:id="@+id/rb_reels"
             android:layout_width="0dp"
             android:layout_height="wrap_content"

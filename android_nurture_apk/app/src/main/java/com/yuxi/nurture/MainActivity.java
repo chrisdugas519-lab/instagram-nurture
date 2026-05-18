@@ -1,24 +1,24 @@
 package com.yuxi.nurture;
 
-import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
-import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.provider.Settings;
+import android.text.Editable;
+import android.text.TextWatcher;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.RadioGroup;
 import android.widget.ScrollView;
 import android.widget.SeekBar;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
-import androidx.localbroadcastmanager.content.LocalBroadcastManager;
 
 public class MainActivity extends AppCompatActivity {
 
@@ -31,7 +31,6 @@ public class MainActivity extends AppCompatActivity {
 
     private Handler uiHandler = new Handler(Looper.getMainLooper());
     public static MainActivity instance;
-    private BroadcastReceiver logReceiver;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -41,7 +40,6 @@ public class MainActivity extends AppCompatActivity {
 
         initViews();
         loadConfig();
-        registerLogReceiver();
 
         btnStart.setOnClickListener(v -> {
             if (!isAccessibilityServiceEnabled()) {
@@ -54,6 +52,7 @@ public class MainActivity extends AppCompatActivity {
             NurtureService.isRunning = true;
             appendLog("🚀 启动养号任务...");
 
+            // 启动服务
             Intent intent = new Intent(this, NurtureService.class);
             intent.putExtra("mode", getSelectedMode());
             intent.putExtra("keywords", etKeywords.getText().toString());
@@ -70,32 +69,6 @@ public class MainActivity extends AppCompatActivity {
             btnStop.setEnabled(false);
             appendLog("⏹ 停止请求已发送");
         });
-    }
-
-    @Override
-    protected void onDestroy() {
-        super.onDestroy();
-        if (logReceiver != null) {
-            unregisterReceiver(logReceiver);
-            logReceiver = null;
-        }
-        instance = null;
-    }
-
-    private void registerLogReceiver() {
-        logReceiver = new BroadcastReceiver() {
-            @Override
-            public void onReceive(Context context, Intent intent) {
-                if (NurtureService.ACTION_LOG.equals(intent.getAction())) {
-                    String msg = intent.getStringExtra(NurtureService.EXTRA_LOG_MSG);
-                    if (msg != null) {
-                        appendLog(msg);
-                    }
-                }
-            }
-        };
-        IntentFilter filter = new IntentFilter(NurtureService.ACTION_LOG);
-        registerReceiver(logReceiver, filter, Context.RECEIVER_EXPORTED);
     }
 
     private void initViews() {
@@ -122,7 +95,6 @@ public class MainActivity extends AppCompatActivity {
 
     private String getSelectedMode() {
         int id = rgMode.getCheckedRadioButtonId();
-        if (id == R.id.rb_search) return "search";
         if (id == R.id.rb_reels) return "reels";
         if (id == R.id.rb_mixed) return "mixed";
         return "feed";
@@ -166,7 +138,6 @@ public class MainActivity extends AppCompatActivity {
         String mode = sp.getString("mode", "mixed");
         rgMode.check(R.id.rb_mixed);
         if ("feed".equals(mode)) rgMode.check(R.id.rb_feed);
-        else if ("search".equals(mode)) rgMode.check(R.id.rb_search);
         else if ("reels".equals(mode)) rgMode.check(R.id.rb_reels);
 
         etKeywords.setText(sp.getString("keywords", "爱马仕包包,Hermès bag,luxury leather bag"));
@@ -175,6 +146,12 @@ public class MainActivity extends AppCompatActivity {
         etViewMin.setText(String.valueOf(sp.getInt("viewMin", 5)));
         etViewMax.setText(String.valueOf(sp.getInt("viewMax", 15)));
         etDuration.setText(String.valueOf(sp.getInt("duration", 10)));
+    }
+
+    public static void appendLogStatic(Context ctx, final String msg) {
+        if (ctx instanceof MainActivity) {
+            ((MainActivity) ctx).appendLog(msg);
+        }
     }
 
     public void appendLog(final String msg) {
