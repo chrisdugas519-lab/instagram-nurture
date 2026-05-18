@@ -134,7 +134,7 @@ public class NurtureService extends AccessibilityService {
         startActivity(launch);
         sleep(randInt(4000, 6000));
 
-        String pkg = getRootInActiveWindow() != null ? getRootInActiveWindow().getPackageName() : "";
+        String pkg = getRootInActiveWindow() != null ? getRootInActiveWindow().getPackageName().toString() : "";
         if (pkg.contains("instagram")) {
             log("  ✅ Instagram 已打开");
             return true;
