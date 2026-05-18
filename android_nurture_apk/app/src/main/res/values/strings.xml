@@ -11,7 +11,8 @@
     <string name="mode_mixed">混合模式</string>
     <string name="label_like_prob">点赞概率</string>
     <string name="label_view_time">观看时长</string>
-    <string name="label_scroll_count">滑动次数</string>
-    <string name="label_reels_count">Reels 数量</string>
+    <string name="label_duration">养号时长</string>
+    <string name="unit_seconds">秒</string>
+    <string name="unit_minutes">分钟</string>
     <string name="log_title">运行日志</string>
 </resources>

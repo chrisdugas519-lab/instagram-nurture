@@ -132,7 +132,36 @@
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="秒" />
+            android:text="@string/unit_seconds" />
+    </LinearLayout>
+
+    <!-- 养号总时长 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:layout_marginTop="8dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/label_duration"
+            android:layout_marginEnd="8dp" />
+
+        <EditText
+            android:id="@+id/et_duration"
+            android:layout_width="80dp"
+            android:layout_height="wrap_content"
+            android:inputType="number"
+            android:text="10"
+            android:hint="分钟" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/unit_minutes"
+            android:layout_marginStart="4dp" />
     </LinearLayout>
 
     <!-- 按钮 -->

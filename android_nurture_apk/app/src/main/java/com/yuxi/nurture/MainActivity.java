@@ -23,7 +23,7 @@ import androidx.localbroadcastmanager.content.LocalBroadcastManager;
 public class MainActivity extends AppCompatActivity {
 
     private RadioGroup rgMode;
-    private EditText etKeywords, etViewMin, etViewMax;
+    private EditText etKeywords, etViewMin, etViewMax, etDuration;
     private SeekBar sbLikeProb;
     private TextView tvLikeProb, tvLog;
     private Button btnStart, btnStop;
@@ -60,6 +60,7 @@ public class MainActivity extends AppCompatActivity {
             intent.putExtra("likeProb", sbLikeProb.getProgress());
             intent.putExtra("viewMin", Integer.parseInt(etViewMin.getText().toString()));
             intent.putExtra("viewMax", Integer.parseInt(etViewMax.getText().toString()));
+            intent.putExtra("duration", Integer.parseInt(etDuration.getText().toString()));
             startService(intent);
         });
 
@@ -102,6 +103,7 @@ public class MainActivity extends AppCompatActivity {
         etKeywords = findViewById(R.id.et_keywords);
         etViewMin = findViewById(R.id.et_view_min);
         etViewMax = findViewById(R.id.et_view_max);
+        etDuration = findViewById(R.id.et_duration);
         sbLikeProb = findViewById(R.id.sb_like_prob);
         tvLikeProb = findViewById(R.id.tv_like_prob);
         tvLog = findViewById(R.id.tv_log);
@@ -155,6 +157,7 @@ public class MainActivity extends AppCompatActivity {
             .putInt("likeProb", sbLikeProb.getProgress())
             .putInt("viewMin", Integer.parseInt(etViewMin.getText().toString()))
             .putInt("viewMax", Integer.parseInt(etViewMax.getText().toString()))
+            .putInt("duration", Integer.parseInt(etDuration.getText().toString()))
             .apply();
     }
 
@@ -171,6 +174,7 @@ public class MainActivity extends AppCompatActivity {
         tvLikeProb.setText(sbLikeProb.getProgress() + "%");
         etViewMin.setText(String.valueOf(sp.getInt("viewMin", 5)));
         etViewMax.setText(String.valueOf(sp.getInt("viewMax", 15)));
+        etDuration.setText(String.valueOf(sp.getInt("duration", 10)));
     }
 
     public void appendLog(final String msg) {

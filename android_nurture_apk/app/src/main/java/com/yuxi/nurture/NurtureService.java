@@ -25,9 +25,11 @@ public class NurtureService extends AccessibilityService {
     private String[] keywords;
     private int likeProb;
     private int viewMin, viewMax;
+    private int duration; // 养号总时长（分钟）
     private int screenW, screenH;
     private Random random = new Random();
     private Handler handler = new Handler(Looper.getMainLooper());
+    private Handler timeoutHandler = new Handler(Looper.getMainLooper());
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
@@ -40,6 +42,7 @@ public class NurtureService extends AccessibilityService {
             likeProb = intent.getIntExtra("likeProb", 60);
             viewMin = intent.getIntExtra("viewMin", 5);
             viewMax = intent.getIntExtra("viewMax", 15);
+            duration = intent.getIntExtra("duration", 10); // 默认10分钟
 
             screenW = getResources().getDisplayMetrics().widthPixels;
             screenH = getResources().getDisplayMetrics().heightPixels;
@@ -61,56 +64,79 @@ public class NurtureService extends AccessibilityService {
     }
 
     private void runNurtureSession() {
-        log("=");
+        log("========================================");
         log("🚀 开始养号 - 模式: " + mode);
         log("屏幕: " + screenW + "x" + screenH);
         log("关键词: " + String.join(", ", keywords));
-        log("=");
+        log("点赞概率: " + likeProb + "%");
+        log("观看时长: " + viewMin + "~" + viewMax + "秒");
+        log("养号总时长: " + duration + "分钟");
+        log("========================================");
+
+        // 设置超时自动停止
+        final long endTime = System.currentTimeMillis() + duration * 60 * 1000L;
+        timeoutHandler.postDelayed(() -> {
+            log("⏰ 养号时间到（" + duration + "分钟），自动停止...");
+            isRunning = false;
+        }, duration * 60 * 1000L);
 
         try {
             if (!openInstagram()) {
                 log("❌ Instagram 启动失败，请确认已安装 Instagram");
+                timeoutHandler.removeCallbacksAndMessages(null);
                 return;
             }
 
-            if ("feed".equals(mode)) {
-                scrollFeed(0);
-                for (int i = 0; i < randInt(1, 3); i++) {
-                    if (random.nextInt(100) < likeProb) likePost();
-                    scrollFeed(1);
-                }
-            } else if ("search".equals(mode)) {
-                searchBrowse();
-            } else if ("reels".equals(mode)) {
-                watchReels(0);
-            } else {
-                List<String> actions = new ArrayList<>();
-                actions.add("feed");
-                actions.add("search");
-                actions.add("reels");
-                java.util.Collections.shuffle(actions);
-                int num = randInt(2, 3);
-                for (int i = 0; i < num; i++) {
-                    String action = actions.get(i);
+            // 循环执行，直到超时或手动停止
+            int cycle = 0;
+            while (isRunning && System.currentTimeMillis() < endTime) {
+                cycle++;
+                long remaining = (endTime - System.currentTimeMillis()) / 1000;
+                log("--- 第 " + cycle + " 轮 | 剩余 " + (remaining / 60) + "分" + (remaining % 60) + "秒 ---");
+
+                if ("feed".equals(mode)) {
+                    scrollFeed(0);
+                    for (int i = 0; i < randInt(1, 3) && isRunning; i++) {
+                        if (random.nextInt(100) < likeProb) likePost();
+                        scrollFeed(1);
+                    }
+                } else if ("search".equals(mode)) {
+                    searchBrowse();
+                } else if ("reels".equals(mode)) {
+                    watchReels(0);
+                } else {
+                    // mixed：每轮随机选一种动作
+                    String[] actions = {"feed", "search", "reels"};
+                    String action = actions[random.nextInt(actions.length)];
                     log("--- " + action.toUpperCase() + " ---");
-                    if ("feed".equals(action)) scrollFeed(0);
-                    else if ("search".equals(action)) searchBrowse();
-                    else watchReels(0);
-                    randomSleep(3, 8);
+                    if ("feed".equals(action)) {
+                        scrollFeed(0);
+                        for (int i = 0; i < randInt(1, 3) && isRunning; i++) {
+                            if (random.nextInt(100) < likeProb) likePost();
+                            scrollFeed(1);
+                        }
+                    } else if ("search".equals(action)) {
+                        searchBrowse();
+                    } else {
+                        watchReels(0);
+                    }
                 }
+                randomSleep(3, 8);
             }
 
             closeInstagram();
-            log("✅ 养号完成！");
+            log("✅ 养号完成！共执行 " + cycle + " 轮");
 
         } catch (Exception e) {
             log("❌ 错误: " + e.getClass().getSimpleName() + " - " + e.getMessage());
             closeInstagram();
         } finally {
             isRunning = false;
+            timeoutHandler.removeCallbacksAndMessages(null);
             handler.post(() -> {
                 if (MainActivity.instance != null) {
                     MainActivity.instance.runOnUiThread(() -> {
+                        // 通知 UI 更新按钮状态
                     });
                 }
             });
