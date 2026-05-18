@@ -166,14 +166,16 @@ public class NurtureService extends AccessibilityService {
             return true;
         }
 
-        Intent launch = getPackageManager().getLaunchIntentForPackage(targetPackage);
+        final String finalTargetPackage = targetPackage;
+        Intent launch = getPackageManager().getLaunchIntentForPackage(finalTargetPackage);
         launch.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+        final Intent finalLaunch = launch;
 
         // 在主线程启动 Activity，避免后台线程限制
         handler.post(() -> {
             try {
-                startActivity(launch);
-                log("  🟢 startActivity 已调用 (包名: " + targetPackage + ")");
+                startActivity(finalLaunch);
+                log("  🟢 startActivity 已调用 (包名: " + finalTargetPackage + ")");
             } catch (Exception e) {
                 log("  ❌ startActivity 异常: " + e.getMessage());
             }
