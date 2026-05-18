@@ -17,11 +17,13 @@ import java.util.Random;
 
 public class NurtureService extends AccessibilityService {
 
+    public static final String ACTION_LOG = "com.yuxi.nurture.LOG";
+    public static final String EXTRA_LOG_MSG = "msg";
     public static boolean isRunning = false;
 
     private String mode;
     private String[] keywords;
-    private int likeProb;    // 0-100
+    private int likeProb;
     private int viewMin, viewMax;
     private int screenW, screenH;
     private Random random = new Random();
@@ -30,33 +32,33 @@ public class NurtureService extends AccessibilityService {
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         if (intent == null) return START_NOT_STICKY;
-        mode = intent.getStringExtra("mode");
-        if (mode == null) mode = "mixed";
-        String kwStr = intent.getStringExtra("keywords");
-        keywords = kwStr != null ? kwStr.split(",") : new String[]{"爱马仕包包"};
-        likeProb = intent.getIntExtra("likeProb", 60);
-        viewMin = intent.getIntExtra("viewMin", 5);
-        viewMax = intent.getIntExtra("viewMax", 15);
+        try {
+            mode = intent.getStringExtra("mode");
+            if (mode == null) mode = "mixed";
+            String kwStr = intent.getStringExtra("keywords");
+            keywords = kwStr != null ? kwStr.split(",") : new String[]{"爱马仕包包"};
+            likeProb = intent.getIntExtra("likeProb", 60);
+            viewMin = intent.getIntExtra("viewMin", 5);
+            viewMax = intent.getIntExtra("viewMax", 15);
 
-        screenW = getResources().getDisplayMetrics().widthPixels;
-        screenH = getResources().getDisplayMetrics().heightPixels;
+            screenW = getResources().getDisplayMetrics().widthPixels;
+            screenH = getResources().getDisplayMetrics().heightPixels;
 
-        // 在新线程执行养号
-        new Thread(this::runNurtureSession).start();
+            new Thread(this::runNurtureSession).start();
+        } catch (Exception e) {
+            log("❌ onStartCommand 异常: " + e.getMessage());
+        }
         return START_NOT_STICKY;
     }
 
     @Override
     public void onAccessibilityEvent(AccessibilityEvent event) {
-        // 不需要处理事件
     }
 
     @Override
     public void onInterrupt() {
         isRunning = false;
     }
-
-    // ============ 核心养号流程 ============
 
     private void runNurtureSession() {
         log("=");
@@ -67,7 +69,7 @@ public class NurtureService extends AccessibilityService {
 
         try {
             if (!openInstagram()) {
-                log("❌ Instagram 启动失败");
+                log("❌ Instagram 启动失败，请确认已安装 Instagram");
                 return;
             }
 
@@ -82,7 +84,6 @@ public class NurtureService extends AccessibilityService {
             } else if ("reels".equals(mode)) {
                 watchReels(0);
             } else {
-                // mixed
                 List<String> actions = new ArrayList<>();
                 actions.add("feed");
                 actions.add("search");
@@ -103,43 +104,59 @@ public class NurtureService extends AccessibilityService {
             log("✅ 养号完成！");
 
         } catch (Exception e) {
-            log("❌ 错误: " + e.getMessage());
+            log("❌ 错误: " + e.getClass().getSimpleName() + " - " + e.getMessage());
             closeInstagram();
         } finally {
             isRunning = false;
             handler.post(() -> {
                 if (MainActivity.instance != null) {
                     MainActivity.instance.runOnUiThread(() -> {
-                        // UI 更新交给 MainActivity
                     });
                 }
             });
         }
     }
 
-    // ============ Instagram 基础操作 ============
-
     private boolean openInstagram() {
         log("📱 打开 Instagram...");
-        // 强制关闭后打开
-        performGlobalAction(GLOBAL_ACTION_HOME);
-        sleep(500);
 
         Intent launch = getPackageManager().getLaunchIntentForPackage("com.instagram.android");
         if (launch == null) {
-            log("  ❌ 未找到 Instagram");
+            log("  ❌ 未找到 Instagram (包名: com.instagram.android)");
             return false;
         }
-        launch.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-        startActivity(launch);
-        sleep(randInt(4000, 6000));
 
-        String pkg = getRootInActiveWindow() != null ? getRootInActiveWindow().getPackageName().toString() : "";
-        if (pkg.contains("instagram")) {
-            log("  ✅ Instagram 已打开");
-            return true;
+        launch.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+
+        // 在主线程启动 Activity，避免后台线程限制
+        handler.post(() -> {
+            try {
+                startActivity(launch);
+                log("  🟢 startActivity 已调用");
+            } catch (Exception e) {
+                log("  ❌ startActivity 异常: " + e.getMessage());
+            }
+        });
+
+        // 等待 Instagram 启动（增加等待时间）
+        sleep(randInt(5000, 7000));
+
+        // 循环检测是否已打开
+        for (int i = 0; i < 20; i++) {
+            AccessibilityNodeInfo root = getRootInActiveWindow();
+            if (root != null) {
+                CharSequence pkgName = root.getPackageName();
+                if (pkgName != null && pkgName.toString().contains("instagram")) {
+                    log("  ✅ Instagram 已打开");
+                    return true;
+                }
+            }
+            log("  ⏳ 等待 Instagram 启动... (" + (i + 1) + "/20)");
+            sleep(500);
         }
-        return false;
+
+        log("  ⚠️ 未检测到 Instagram，但可能已打开，继续执行");
+        return true;
     }
 
     private void closeInstagram() {
@@ -147,8 +164,6 @@ public class NurtureService extends AccessibilityService {
         performGlobalAction(GLOBAL_ACTION_HOME);
         sleep(randInt(1000, 2000));
     }
-
-    // ============ UI 查找（AccessibilityNodeInfo） ============
 
     private AccessibilityNodeInfo getRoot() {
         return getRootInActiveWindow();
@@ -190,7 +205,6 @@ public class NurtureService extends AccessibilityService {
     }
 
     private AccessibilityNodeInfo findLikeButton() {
-        // Instagram 的点赞按钮
         AccessibilityNodeInfo btn = findByDesc("Like");
         if (btn == null) btn = findByDesc("喜欢");
         return btn;
@@ -210,8 +224,6 @@ public class NurtureService extends AccessibilityService {
         String pkg = root.getPackageName() != null ? root.getPackageName().toString() : "";
         return pkg.contains("instagram");
     }
-
-    // ============ 手势操作 ============
 
     private void smartTap(int x, int y, String label) {
         int ox = randInt(-5, 5);
@@ -264,8 +276,6 @@ public class NurtureService extends AccessibilityService {
         sleep(randInt(800, 1200));
     }
 
-    // ============ 养号动作 ============
-
     private void scrollFeed(int times) {
         if (times == 0) times = randInt(3, 6);
         log("📜 滚动信息流 " + times + " 次...");
@@ -278,7 +288,6 @@ public class NurtureService extends AccessibilityService {
             swipeUp(randInt(200, 400));
             randomSleep(viewMin, viewMax);
 
-            // 误触检测
             if (!isInInstagram()) {
                 log("  ⚠️ 离开 IG，返回");
                 pressBack();
@@ -306,7 +315,6 @@ public class NurtureService extends AccessibilityService {
     private void searchBrowse() {
         log("🔍 搜索浏览...");
 
-        // 点击搜索图标
         AccessibilityNodeInfo searchIcon = findByDesc("Search");
         if (searchIcon != null) {
             smartClickNode(searchIcon, "搜索图标");
@@ -315,11 +323,9 @@ public class NurtureService extends AccessibilityService {
         }
         sleep(randInt(1500, 2500));
 
-        // 选择关键词
         String kw = keywords[random.nextInt(keywords.length)].trim();
         log("  🔑 搜索: " + kw);
 
-        // 输入
         AccessibilityNodeInfo searchBar = findNodeByClassName(getRoot(), "android.widget.EditText");
         if (searchBar != null) {
             smartClickNode(searchBar, "搜索栏");
@@ -328,15 +334,11 @@ public class NurtureService extends AccessibilityService {
         }
         sleep(500);
 
-        // 用输入法输入（Accessibility 不直接支持 input text，用点击坐标代替）
-        // 实际输入需要模拟键盘点击，这里简化处理
         log("  ⚠️ 请手动输入或确保搜索栏已激活");
         sleep(2000);
 
-        // 回车搜索
-        pressBack(); // 收起键盘
+        pressBack();
         sleep(500);
-        // 点击搜索按钮或回车
         AccessibilityNodeInfo searchBtn = findByText("搜索");
         if (searchBtn == null) searchBtn = findByText("Search");
         if (searchBtn != null) smartClickNode(searchBtn, "搜索确认");
@@ -376,8 +378,6 @@ public class NurtureService extends AccessibilityService {
         pressBack();
     }
 
-    // ============ 工具方法 ============
-
     private AccessibilityNodeInfo findNodeByClassName(AccessibilityNodeInfo root, String className) {
         if (root == null) return null;
         CharSequence cls = root.getClassName();
@@ -411,7 +411,8 @@ public class NurtureService extends AccessibilityService {
 
     private void log(String msg) {
         Log.d("NurtureService", msg);
-        // 这里可以通过广播或 SharedPreferences 把日志传给 MainActivity
-        // 简化版：先只输出到 logcat
+        Intent intent = new Intent(ACTION_LOG);
+        intent.putExtra(EXTRA_LOG_MSG, msg);
+        sendBroadcast(intent);
     }
 }
