@@ -70,13 +70,11 @@ public class NurtureService extends AccessibilityService {
         log("关键词: " + String.join(", ", keywords));
         log("=");
 
+        long startTime = System.currentTimeMillis();
+        long totalMs = duration * 60 * 1000L;
+        long endTime = startTime + totalMs;
+
         try {
-            // 设置超时自动停止
-            long timeoutMs = duration * 60 * 1000L;
-            timeoutHandler.postDelayed(() -> {
-                log("⏰ 养号时间到（" + duration + " 分钟），自动停止...");
-                isRunning = false;
-            }, timeoutMs);
             log("⏱️ 设定养号时长: " + duration + " 分钟");
 
             if (!openInstagram()) {
@@ -88,32 +86,61 @@ public class NurtureService extends AccessibilityService {
             navigateToHome();
 
             if ("feed".equals(mode)) {
-                scrollFeed(0);
-                for (int i = 0; i < randInt(1, 3); i++) {
-                    if (!isRunning) return;
-                    if (random.nextInt(100) < likeProb) likePost();
-                    if (!isRunning) return;
+                log("--- FEED 模式 ---");
+                while (System.currentTimeMillis() < endTime && isRunning) {
+                    if (skipIfAd()) continue;
                     scrollFeed(1);
+                    if (random.nextInt(100) < likeProb) likePost();
+                    interruptibleSleep(viewMin, viewMax);
+                    if (!isInInstagram()) { log("  ⚠️ 离开 IG，返回"); pressBack(); sleep(1000); }
                 }
             } else if ("reels".equals(mode)) {
-                watchReels(0);
-            } else {
-                // mixed
-                List<String> actions = new ArrayList<>();
-                actions.add("feed");
-                actions.add("reels");
-                java.util.Collections.shuffle(actions);
-                int num = randInt(2, 3);
-                for (int i = 0; i < num; i++) {
-                    if (!isRunning) return;
-                    String action = actions.get(i);
-                    log("--- " + action.toUpperCase() + " ---");
-                    if ("feed".equals(action)) {
-                        navigateToHome();
-                        scrollFeed(0);
+                log("--- REELS 模式 ---");
+                navigateToReels();
+                while (System.currentTimeMillis() < endTime && isRunning) {
+                    int reelDur = randInt(viewMin, viewMax);
+                    log("  📹 观看 Reel " + reelDur + "秒...");
+                    interruptibleSleep(reelDur, reelDur);
+                    if (!isRunning) break;
+                    if (random.nextInt(100) < likeProb) {
+                        smartTap(screenW/2 + randInt(-50, 50), screenH/2 + randInt(-50, 50), "点赞");
+                        interruptibleSleep(1, 1);
                     }
-                    else watchReels(0);
-                    randomSleep(3, 8);
+                    swipeXY(screenW/2, (int)(screenH*0.7), screenW/2, (int)(screenH*0.25), randInt(300, 500));
+                    interruptibleSleep(2, 3);
+                }
+                pressBack();
+            } else {
+                // mixed: 一半时间 feed，一半时间 reels
+                long halfMs = totalMs / 2;
+
+                // 阶段 1: Feed
+                log("--- FEED 阶段（约 " + (duration/2) + " 分钟）---");
+                while (System.currentTimeMillis() - startTime < halfMs && isRunning) {
+                    if (skipIfAd()) continue;
+                    scrollFeed(1);
+                    if (random.nextInt(100) < likeProb) likePost();
+                    interruptibleSleep(viewMin, viewMax);
+                    if (!isInInstagram()) { log("  ⚠️ 离开 IG，返回"); pressBack(); sleep(1000); }
+                }
+
+                // 阶段 2: Reels
+                if (isRunning) {
+                    log("--- REELS 阶段（约 " + (duration - duration/2) + " 分钟）---");
+                    navigateToReels();
+                    while (System.currentTimeMillis() < endTime && isRunning) {
+                        int reelDur = randInt(viewMin, viewMax);
+                        log("  📹 观看 Reel " + reelDur + "秒...");
+                        interruptibleSleep(reelDur, reelDur);
+                        if (!isRunning) break;
+                        if (random.nextInt(100) < likeProb) {
+                            smartTap(screenW/2 + randInt(-50, 50), screenH/2 + randInt(-50, 50), "点赞");
+                            interruptibleSleep(1, 1);
+                        }
+                        swipeXY(screenW/2, (int)(screenH*0.7), screenW/2, (int)(screenH*0.25), randInt(300, 500));
+                        interruptibleSleep(2, 3);
+                    }
+                    pressBack();
                 }
             }
 
@@ -125,7 +152,6 @@ public class NurtureService extends AccessibilityService {
             closeInstagram();
         } finally {
             isRunning = false;
-            timeoutHandler.removeCallbacksAndMessages(null);
             handler.post(() -> {
                 if (MainActivity.instance != null) {
                     MainActivity.instance.runOnUiThread(() -> {
@@ -310,8 +336,9 @@ public class NurtureService extends AccessibilityService {
 
     private void swipeUp(int dur) {
         int x = screenW / 2 + randInt(-50, 50);
-        int sy = (int)(screenH * 0.85) + randInt(-30, 30);
-        int ey = (int)(screenH * 0.15) + randInt(-30, 30);
+        // 减小划动距离：75% -> 35%，刚好滑过一个帖子
+        int sy = (int)(screenH * 0.75) + randInt(-20, 20);
+        int ey = (int)(screenH * 0.35) + randInt(-20, 20);
         log("  📜 上滑信息流 (" + dur + "ms)");
         swipeXY(x, sy, x, ey, dur);
     }
@@ -346,15 +373,17 @@ public class NurtureService extends AccessibilityService {
 
         for (int i = 0; i < times; i++) {
             if (!isRunning) return;
+            // 检测到广告直接跳过，不再停留
             if (isAdPresent()) {
-                log("  ⚠️ 检测到广告，稍作停留...");
-                interruptibleSleep(3, 5);
+                log("  ⚠️ 检测到广告，直接跳过...");
+                swipeUp(randInt(300, 500));
+                interruptibleSleep(2, 3);
+                continue;
             }
             swipeUp(randInt(200, 400));
             log("  ⏳ 等待内容加载...");
             interruptibleSleep(2, 2); // 滑动后给 2 秒加载缓冲
             if (!isRunning) return;
-            interruptibleSleep(viewMin, viewMax);
 
             // 误触检测
             if (!isInInstagram()) {
@@ -363,6 +392,27 @@ public class NurtureService extends AccessibilityService {
                 sleep(1000);
             }
         }
+    }
+
+    private boolean skipIfAd() {
+        if (isAdPresent()) {
+            log("  ⚠️ 检测到广告，直接跳过...");
+            swipeUp(randInt(300, 500));
+            interruptibleSleep(2, 3);
+            return true;
+        }
+        return false;
+    }
+
+    private void navigateToReels() {
+        log("🎬 导航到 Reels...");
+        AccessibilityNodeInfo reelsIcon = findByDesc("Reels");
+        if (reelsIcon != null) {
+            smartClickNode(reelsIcon, "Reels 图标");
+        } else {
+            smartTap((int)(screenW * 0.30), (int)(screenH * 0.95), "Reels(兜底)");
+        }
+        sleep(randInt(2500, 3500));
     }
 
     // 可中断的睡眠：每 1 秒检查一次 isRunning
