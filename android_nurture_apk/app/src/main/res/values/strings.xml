@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">御玺工坊 - IG 养号</string>
+    <string name="service_desc">御玺工坊 Instagram 智能养号服务</string>
+    <string name="hint_keywords">关键词，逗号分隔</string>
+    <string name="btn_start">开始养号</string>
+    <string name="btn_stop">停止</string>
+    <string name="mode_feed">首页刷帖</string>
+    <string name="mode_search">搜索浏览</string>
+    <string name="mode_reels">Reels</string>
+    <string name="mode_mixed">混合模式</string>
+    <string name="label_like_prob">点赞概率</string>
+    <string name="label_view_time">观看时长</string>
+    <string name="label_scroll_count">滑动次数</string>
+    <string name="label_reels_count">Reels 数量</string>
+    <string name="log_title">运行日志</string>
+</resources>
