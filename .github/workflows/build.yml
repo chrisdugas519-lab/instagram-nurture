@@ -1,0 +1,35 @@
+name: Build Instagram Nurture APK
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - uses: android-actions/setup-android@v3
+
+      - run: (yes || true) | sdkmanager --licenses || true
+
+      - name: Build APK
+        run: |
+          cd android_nurture_apk
+          sudo apt-get update -qq && sudo apt-get install -y -qq gradle
+          gradle wrapper --gradle-version 8.5
+          ./gradlew assembleDebug --stacktrace
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: instagram-nurture-apk
+          path: android_nurture_apk/app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 30
