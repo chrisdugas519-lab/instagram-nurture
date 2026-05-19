@@ -107,7 +107,7 @@ public class NurtureService extends AccessibilityService {
                         likeReels();
                     }
                     // Reels 切换：300-600ms 上划，比之前 150ms 更自然
-                    swipeXY(screenW/2, (int)(screenH*0.75), screenW/2, (int)(screenH*0.25), randInt(300, 600));
+                    swipeXY(screenW/2, (int)(screenH*0.75), screenW/2, (int)(screenH*0.25), randInt(400, 700));
                     interruptibleSleep(2, 3);
                 }
                 pressBack();
@@ -349,7 +349,7 @@ public class NurtureService extends AccessibilityService {
 
     private void swipeUp(int dur) {
         int x = screenW / 2 + randInt(-40, 40);
-        // 从 80% 划到 20%，距离适中；速度 400-800ms 模拟人类自然滑动
+        // 从 80% 划到 20%，距离适中；速度 800-1400ms 模拟人类自然滑动
         int sy = (int)(screenH * 0.80) + randInt(-20, 20);
         int ey = (int)(screenH * 0.20) + randInt(-20, 20);
         log("  📜 上滑信息流 (" + dur + "ms)");
@@ -360,7 +360,8 @@ public class NurtureService extends AccessibilityService {
         Path path = new Path();
         path.moveTo(x, y);
         GestureDescription.Builder builder = new GestureDescription.Builder();
-        builder.addStroke(new GestureDescription.StrokeDescription(path, 0, 100));
+        // 修复：单次点击只做 30ms 轻触，不要当成长按
+        builder.addStroke(new GestureDescription.StrokeDescription(path, 0, 30));
         dispatchGesture(builder.build(), null, null);
     }
 
@@ -390,7 +391,7 @@ public class NurtureService extends AccessibilityService {
             // 检测到广告：快速划过，不要在广告区域起始划动（会触发点击）
             if (isAdPresent()) {
                 log("  ⚠️ 检测到广告，快速跳过...");
-                swipeUp(200);
+                swipeUp(500);
                 interruptibleSleep(2, 3);
                 if (!isInFeed()) {
                     log("  ⚠️ 误触广告，返回信息流");
@@ -400,8 +401,8 @@ public class NurtureService extends AccessibilityService {
                 continue;
             }
 
-            // 普通帖子：人类自然滑动速度 400-800ms
-            swipeUp(randInt(400, 800));
+            // 普通帖子：人类自然滑动速度 800-1400ms
+            swipeUp(randInt(800, 1400));
             log("  ⏳ 等待内容加载...");
             sleep(800);  // 给页面加载时间
             if (!isRunning) return;
@@ -473,9 +474,9 @@ public class NurtureService extends AccessibilityService {
             log("  ⚠️ 未找到点赞按钮，坐标兜底");
             int likeX = screenW / 2 + randInt(-50, 50);
             int likeY = (int)(screenH * 0.42) + randInt(-40, 40);
-            // 双击同一坐标（模拟人类双击）
+            // 双击同一坐标：两次 tap 间隔 25ms，总耗时 ~110ms（IG 可识别为双击）
             smartTap(likeX, likeY, "双击第1下");
-            sleep(80);
+            sleep(25);
             smartTap(likeX, likeY, "双击第2下");
             sleep(500);
         }
@@ -528,7 +529,7 @@ public class NurtureService extends AccessibilityService {
             }
 
             if (i < count - 1) {
-                swipeXY(screenW/2, (int)(screenH*0.7), screenW/2, (int)(screenH*0.25), randInt(300, 600));
+                swipeXY(screenW/2, (int)(screenH*0.7), screenW/2, (int)(screenH*0.25), randInt(400, 700));
                 interruptibleSleep(2, 3); // 加载下一个 Reel 的缓冲
             }
         }
