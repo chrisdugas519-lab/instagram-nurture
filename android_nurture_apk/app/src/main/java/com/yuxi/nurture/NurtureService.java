@@ -305,6 +305,29 @@ public class NurtureService extends AccessibilityService {
         return false;
     }
 
+    // 检测并关闭 "为你推荐" 弹窗
+    private boolean dismissSuggestion() {
+        String[] sugKws = {"为你推荐", "Suggested for you"};
+        for (String kw : sugKws) {
+            if (findByText(kw) != null) {
+                log("  ⚠️ 检测到『为你推荐』弹窗，尝试关闭...");
+                // 优先找关闭按钮
+                AccessibilityNodeInfo closeBtn = findByDesc("Close");
+                if (closeBtn == null) closeBtn = findByDesc("关闭");
+                if (closeBtn == null) closeBtn = findByDesc("Dismiss");
+                if (closeBtn != null) {
+                    smartClickNode(closeBtn, "关闭推荐");
+                } else {
+                    // 兜底：按返回键
+                    pressBack();
+                }
+                sleep(500);
+                return true;
+            }
+        }
+        return false;
+    }
+
     private boolean isInInstagram() {
         AccessibilityNodeInfo root = getRoot();
         if (root == null) return false;
@@ -365,6 +388,19 @@ public class NurtureService extends AccessibilityService {
         dispatchGesture(builder.build(), null, null);
     }
 
+    // 修复：真正的双击，用单个 GestureDescription 包含两次 stroke，避免异步时序错乱
+    private void doubleTapXY(int x, int y) {
+        Path path1 = new Path();
+        path1.moveTo(x, y);
+        Path path2 = new Path();
+        path2.moveTo(x, y);
+        GestureDescription.Builder builder = new GestureDescription.Builder();
+        // 第一次 tap：0ms 开始，持续 30ms；第二次 tap：60ms 开始（间隔 30ms），持续 30ms
+        builder.addStroke(new GestureDescription.StrokeDescription(path1, 0, 30));
+        builder.addStroke(new GestureDescription.StrokeDescription(path2, 60, 30));
+        dispatchGesture(builder.build(), null, null);
+    }
+
     private void swipeXY(int x1, int y1, int x2, int y2, int dur) {
         Path path = new Path();
         path.moveTo(x1, y1);
@@ -387,6 +423,9 @@ public class NurtureService extends AccessibilityService {
 
         for (int i = 0; i < times; i++) {
             if (!isRunning) return;
+
+            // 修复：先检测并关闭「为你推荐」弹窗
+            if (dismissSuggestion()) continue;
 
             // 检测到广告：快速划过，不要在广告区域起始划动（会触发点击）
             if (isAdPresent()) {
@@ -458,6 +497,9 @@ public class NurtureService extends AccessibilityService {
     }
 
     private void likePost() {
+        // 先关闭可能的弹窗
+        if (dismissSuggestion()) return;
+
         // 先确认还在信息流，不在就跳过（避免在 Reels/广告页乱点）
         if (!isInFeed()) {
             log("  ⚠️ 不在信息流，跳过点赞");
@@ -471,13 +513,11 @@ public class NurtureService extends AccessibilityService {
             sleep(500);
         } else {
             // 兜底：点击帖子图片中央区域双击点赞
-            log("  ⚠️ 未找到点赞按钮，坐标兜底");
+            log("  ⚠️ 未找到点赞按钮，坐标兜底双击");
             int likeX = screenW / 2 + randInt(-50, 50);
             int likeY = (int)(screenH * 0.42) + randInt(-40, 40);
-            // 双击同一坐标：两次 tap 间隔 25ms，总耗时 ~110ms（IG 可识别为双击）
-            smartTap(likeX, likeY, "双击第1下");
-            sleep(25);
-            smartTap(likeX, likeY, "双击第2下");
+            // 修复：用单个 GestureDescription 做真正的双击，避免异步时序错乱
+            doubleTapXY(likeX, likeY);
             sleep(500);
         }
         // 点赞后检测是否误触离开信息流
