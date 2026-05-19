@@ -106,8 +106,8 @@ public class NurtureService extends AccessibilityService {
                     if (random.nextInt(100) < likeProb) {
                         likeReels();
                     }
-                    // Reels 切换：快速上划（150ms），慢了会暂停
-                    swipeXY(screenW/2, (int)(screenH*0.75), screenW/2, (int)(screenH*0.25), 150);
+                    // Reels 切换：300-600ms 上划，比之前 150ms 更自然
+                    swipeXY(screenW/2, (int)(screenH*0.75), screenW/2, (int)(screenH*0.25), randInt(300, 600));
                     interruptibleSleep(2, 3);
                 }
                 pressBack();
@@ -312,6 +312,18 @@ public class NurtureService extends AccessibilityService {
         return pkg.contains("instagram");
     }
 
+    // 检测是否在首页信息流（排除 Reels / 个人主页 / 搜索页）
+    private boolean isInFeed() {
+        AccessibilityNodeInfo root = getRoot();
+        if (root == null) return false;
+        String pkg = root.getPackageName() != null ? root.getPackageName().toString().toLowerCase() : "";
+        if (!pkg.contains("instagram")) return false;
+        // 通过 UI 元素判断：Feed 页面有底部导航栏和 "Home" 按钮
+        AccessibilityNodeInfo home = findByDesc("Home");
+        if (home == null) home = findByDesc("首页");
+        return home != null;
+    }
+
     // ============ 手势操作 ============
 
     private void smartTap(int x, int y, String label) {
@@ -336,11 +348,10 @@ public class NurtureService extends AccessibilityService {
     }
 
     private void swipeUp(int dur) {
-        int x = screenW / 2 + randInt(-30, 30);
-        // 从 72% 划到 38%，避开顶部标题栏和底部导航栏
-        // 速度必须足够快（80-150ms），否则 Instagram 会识别为长按，打开帖子/Reels
-        int sy = (int)(screenH * 0.72) + randInt(-15, 15);
-        int ey = (int)(screenH * 0.38) + randInt(-15, 15);
+        int x = screenW / 2 + randInt(-40, 40);
+        // 从 80% 划到 20%，距离适中；速度 400-800ms 模拟人类自然滑动
+        int sy = (int)(screenH * 0.80) + randInt(-20, 20);
+        int ey = (int)(screenH * 0.20) + randInt(-20, 20);
         log("  📜 上滑信息流 (" + dur + "ms)");
         swipeXY(x, sy, x, ey, dur);
     }
@@ -379,40 +390,40 @@ public class NurtureService extends AccessibilityService {
             // 检测到广告：快速划过，不要在广告区域起始划动（会触发点击）
             if (isAdPresent()) {
                 log("  ⚠️ 检测到广告，快速跳过...");
-                // 快速划动（100ms），避免慢速被识别为点击广告
-                swipeUp(100);
+                swipeUp(200);
                 interruptibleSleep(2, 3);
-                // 检查是否误入广告页面
-                if (!isInInstagram()) {
-                    log("  ⚠️ 误触广告，返回");
+                if (!isInFeed()) {
+                    log("  ⚠️ 误触广告，返回信息流");
                     pressBack();
                     sleep(1500);
                 }
                 continue;
             }
 
-            // 普通帖子：快速划动（80-120ms），防止被识别为长按进入Reels全屏
-            swipeUp(randInt(80, 120));
+            // 普通帖子：人类自然滑动速度 400-800ms
+            swipeUp(randInt(400, 800));
             log("  ⏳ 等待内容加载...");
-            interruptibleSleep(2, 2);
+            sleep(800);  // 给页面加载时间
             if (!isRunning) return;
 
-            // 误触检测：如果进入了非 IG 页面或 Reels 全屏
-            if (!isInInstagram()) {
-                log("  ⚠️ 离开 IG，返回");
+            // 误触检测：检查是否离开了信息流（进了帖子详情/Reels/广告页）
+            if (!isInFeed()) {
+                log("  ⚠️ 离开信息流，自动返回");
                 pressBack();
-                sleep(1000);
+                sleep(1500);
             }
+
+            interruptibleSleep(viewMin > 2 ? 2 : 1, 3);
         }
     }
 
     private boolean skipIfAd() {
         if (isAdPresent()) {
             log("  ⚠️ 检测到广告，快速跳过...");
-            swipeUp(100);
+            swipeUp(200);
             interruptibleSleep(2, 3);
-            if (!isInInstagram()) {
-                log("  ⚠️ 误触广告，返回");
+            if (!isInFeed()) {
+                log("  ⚠️ 误触广告，返回信息流");
                 pressBack();
                 sleep(1500);
             }
@@ -446,17 +457,33 @@ public class NurtureService extends AccessibilityService {
     }
 
     private void likePost() {
+        // 先确认还在信息流，不在就跳过（避免在 Reels/广告页乱点）
+        if (!isInFeed()) {
+            log("  ⚠️ 不在信息流，跳过点赞");
+            return;
+        }
         log("❤️ 尝试点赞...");
         AccessibilityNodeInfo btn = findLikeButton();
         if (btn != null) {
             log("  ✅ 找到点赞按钮");
             smartClickNode(btn, "点赞");
-            sleep(300);
+            sleep(500);
         } else {
-            // 兜底：点击帖子下方左侧心形图标区域（大约屏幕 80% 高度左侧）
+            // 兜底：点击帖子图片中央区域双击点赞
             log("  ⚠️ 未找到点赞按钮，坐标兜底");
-            smartTap((int)(screenW * 0.12), (int)(screenH * 0.80) + randInt(-20, 20), "点赞兜底");
-            sleep(300);
+            int likeX = screenW / 2 + randInt(-50, 50);
+            int likeY = (int)(screenH * 0.42) + randInt(-40, 40);
+            // 双击同一坐标（模拟人类双击）
+            smartTap(likeX, likeY, "双击第1下");
+            sleep(80);
+            smartTap(likeX, likeY, "双击第2下");
+            sleep(500);
+        }
+        // 点赞后检测是否误触离开信息流
+        if (!isInFeed()) {
+            log("  ⚠️ 点赞后离开信息流，自动返回");
+            pressBack();
+            sleep(1000);
         }
     }
 
@@ -501,7 +528,7 @@ public class NurtureService extends AccessibilityService {
             }
 
             if (i < count - 1) {
-                swipeXY(screenW/2, (int)(screenH*0.7), screenW/2, (int)(screenH*0.25), randInt(300, 500));
+                swipeXY(screenW/2, (int)(screenH*0.7), screenW/2, (int)(screenH*0.25), randInt(300, 600));
                 interruptibleSleep(2, 3); // 加载下一个 Reel 的缓冲
             }
         }
