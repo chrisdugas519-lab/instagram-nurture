@@ -19,7 +19,8 @@ import java.util.Random;
 
 public class NurtureService extends AccessibilityService {
 
-    public static boolean isRunning = false;
+    // volatile 确保多线程可见性，停止按钮立即生效
+    public static volatile boolean isRunning = false;
 
     private String mode;
     private String[] keywords;
@@ -103,10 +104,10 @@ public class NurtureService extends AccessibilityService {
                     interruptibleSleep(reelDur, reelDur);
                     if (!isRunning) break;
                     if (random.nextInt(100) < likeProb) {
-                        smartTap(screenW/2 + randInt(-50, 50), screenH/2 + randInt(-50, 50), "点赞");
-                        interruptibleSleep(1, 1);
+                        likeReels();
                     }
-                    swipeXY(screenW/2, (int)(screenH*0.7), screenW/2, (int)(screenH*0.25), randInt(300, 500));
+                    // Reels 切换：快速上划（150ms），慢了会暂停
+                    swipeXY(screenW/2, (int)(screenH*0.75), screenW/2, (int)(screenH*0.25), 150);
                     interruptibleSleep(2, 3);
                 }
                 pressBack();
@@ -134,10 +135,10 @@ public class NurtureService extends AccessibilityService {
                         interruptibleSleep(reelDur, reelDur);
                         if (!isRunning) break;
                         if (random.nextInt(100) < likeProb) {
-                            smartTap(screenW/2 + randInt(-50, 50), screenH/2 + randInt(-50, 50), "点赞");
-                            interruptibleSleep(1, 1);
+                            likeReels();
                         }
-                        swipeXY(screenW/2, (int)(screenH*0.7), screenW/2, (int)(screenH*0.25), randInt(300, 500));
+                        // Reels 切换：快速上划（150ms），慢了会暂停
+                        swipeXY(screenW/2, (int)(screenH*0.75), screenW/2, (int)(screenH*0.25), 150);
                         interruptibleSleep(2, 3);
                     }
                     pressBack();
@@ -335,10 +336,11 @@ public class NurtureService extends AccessibilityService {
     }
 
     private void swipeUp(int dur) {
-        int x = screenW / 2 + randInt(-50, 50);
-        // 减小划动距离：75% -> 35%，刚好滑过一个帖子
-        int sy = (int)(screenH * 0.75) + randInt(-20, 20);
-        int ey = (int)(screenH * 0.35) + randInt(-20, 20);
+        int x = screenW / 2 + randInt(-30, 30);
+        // 从 72% 划到 38%，避开顶部标题栏和底部导航栏
+        // 速度必须足够快（80-150ms），否则 Instagram 会识别为长按，打开帖子/Reels
+        int sy = (int)(screenH * 0.72) + randInt(-15, 15);
+        int ey = (int)(screenH * 0.38) + randInt(-15, 15);
         log("  📜 上滑信息流 (" + dur + "ms)");
         swipeXY(x, sy, x, ey, dur);
     }
@@ -373,19 +375,29 @@ public class NurtureService extends AccessibilityService {
 
         for (int i = 0; i < times; i++) {
             if (!isRunning) return;
-            // 检测到广告直接跳过，不再停留
+
+            // 检测到广告：快速划过，不要在广告区域起始划动（会触发点击）
             if (isAdPresent()) {
-                log("  ⚠️ 检测到广告，直接跳过...");
-                swipeUp(randInt(300, 500));
+                log("  ⚠️ 检测到广告，快速跳过...");
+                // 快速划动（100ms），避免慢速被识别为点击广告
+                swipeUp(100);
                 interruptibleSleep(2, 3);
+                // 检查是否误入广告页面
+                if (!isInInstagram()) {
+                    log("  ⚠️ 误触广告，返回");
+                    pressBack();
+                    sleep(1500);
+                }
                 continue;
             }
-            swipeUp(randInt(200, 400));
+
+            // 普通帖子：快速划动（80-120ms），防止被识别为长按进入Reels全屏
+            swipeUp(randInt(80, 120));
             log("  ⏳ 等待内容加载...");
-            interruptibleSleep(2, 2); // 滑动后给 2 秒加载缓冲
+            interruptibleSleep(2, 2);
             if (!isRunning) return;
 
-            // 误触检测
+            // 误触检测：如果进入了非 IG 页面或 Reels 全屏
             if (!isInInstagram()) {
                 log("  ⚠️ 离开 IG，返回");
                 pressBack();
@@ -396,9 +408,14 @@ public class NurtureService extends AccessibilityService {
 
     private boolean skipIfAd() {
         if (isAdPresent()) {
-            log("  ⚠️ 检测到广告，直接跳过...");
-            swipeUp(randInt(300, 500));
+            log("  ⚠️ 检测到广告，快速跳过...");
+            swipeUp(100);
             interruptibleSleep(2, 3);
+            if (!isInInstagram()) {
+                log("  ⚠️ 误触广告，返回");
+                pressBack();
+                sleep(1500);
+            }
             return true;
         }
         return false;
@@ -434,14 +451,29 @@ public class NurtureService extends AccessibilityService {
         if (btn != null) {
             log("  ✅ 找到点赞按钮");
             smartClickNode(btn, "点赞");
-            sleep(100);
-            smartClickNode(btn, "点赞第二次");
+            sleep(300);
         } else {
-            log("  ⚠️ 未找到，坐标兜底");
-            smartTap(screenW/2 + randInt(-80, 80), (int)(screenH * 0.45) + randInt(-50, 50), "双击点赞");
-            sleep(80);
-            smartTap(screenW/2 + randInt(-80, 80), (int)(screenH * 0.45) + randInt(-50, 50), "双击点赞");
+            // 兜底：点击帖子下方左侧心形图标区域（大约屏幕 80% 高度左侧）
+            log("  ⚠️ 未找到点赞按钮，坐标兜底");
+            smartTap((int)(screenW * 0.12), (int)(screenH * 0.80) + randInt(-20, 20), "点赞兜底");
+            sleep(300);
         }
+    }
+
+    // Reels 专用点赞：点右侧心形按钮（约 x=90%, y=65%），绝对不能点中央
+    private void likeReels() {
+        log("❤️ Reels 点赞...");
+        // 先尝试找 Like 按钮
+        AccessibilityNodeInfo btn = findLikeButton();
+        if (btn != null) {
+            smartClickNode(btn, "Reels点赞");
+        } else {
+            // 兜底：Reels 右侧按钮组 - 心形在右边约 x=88%, y=60%
+            int likeX = (int)(screenW * 0.88) + randInt(-10, 10);
+            int likeY = (int)(screenH * 0.60) + randInt(-20, 20);
+            smartTap(likeX, likeY, "Reels点赞兜底");
+        }
+        interruptibleSleep(1, 1);
     }
 
     private void watchReels(int count) {
