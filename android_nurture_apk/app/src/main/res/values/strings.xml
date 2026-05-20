@@ -5,9 +5,6 @@
     <string name="hint_keywords">关键词，逗号分隔</string>
     <string name="btn_start">开始养号</string>
     <string name="btn_stop">停止</string>
-    <string name="mode_feed">首页刷帖</string>
-    <string name="mode_reels">Reels</string>
-    <string name="mode_mixed">混合模式</string>
     <string name="label_like_prob">点赞概率</string>
     <string name="label_view_time">观看时长</string>
     <string name="label_duration">养号时长</string>
