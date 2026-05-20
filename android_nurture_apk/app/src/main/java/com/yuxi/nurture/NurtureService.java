@@ -79,8 +79,23 @@ public class NurtureService extends AccessibilityService {
             navigateToReels();
 
             int reelIndex = 0;
+            int adCount = 0;
             while (System.currentTimeMillis() < endTime && isRunning) {
                 reelIndex++;
+
+                // 检测广告：遇到广告直接跳过，不观看、不点赞
+                if (isReelsAd()) {
+                    adCount++;
+                    log("  🚫 检测到广告 (#" + adCount + ")，直接跳过");
+                    int swipeDur = randInt(400, 700);
+                    int x = screenW / 2 + randInt(-30, 30);
+                    int sy = (int)(screenH * 0.75);
+                    int ey = (int)(screenH * 0.25);
+                    swipeXY(x, sy, x, ey, swipeDur);
+                    interruptibleSleep(2, 3);
+                    continue;
+                }
+
                 int watchDur = randInt(viewMin, viewMax);
                 log("  📹 第 " + reelIndex + " 个 Reel - 观看 " + watchDur + "秒");
                 interruptibleSleep(watchDur, watchDur);
@@ -113,7 +128,7 @@ public class NurtureService extends AccessibilityService {
 
             pressBack();
             closeInstagram();
-            log("✅ 养号完成！共观看 " + reelIndex + " 个 Reels");
+            log("✅ 养号完成！共观看 " + reelIndex + " 个 Reels，跳过广告 " + adCount + " 次");
 
         } catch (Exception e) {
             log("❌ 错误: " + e.getMessage());
@@ -234,6 +249,38 @@ public class NurtureService extends AccessibilityService {
         AccessibilityNodeInfo btn = findByDesc("Like");
         if (btn == null) btn = findByDesc("喜欢");
         return btn;
+    }
+
+    // ============ Reels 广告检测 ============
+
+    private boolean isReelsAd() {
+        // 检测 Reels 页面中的广告标识
+        String[] adTexts = {"Sponsored", "sponsored", "推广", "赞助", "广告", "查看详情", "Learn more", "了解更多", "立即免费体验"};
+        AccessibilityNodeInfo root = getRoot();
+        if (root == null) return false;
+        return isReelsAdRecursive(root, adTexts);
+    }
+
+    private boolean isReelsAdRecursive(AccessibilityNodeInfo node, String[] adTexts) {
+        if (node == null) return false;
+        CharSequence txt = node.getText();
+        CharSequence desc = node.getContentDescription();
+        if (txt != null) {
+            String s = txt.toString().toLowerCase();
+            for (String kw : adTexts) {
+                if (s.contains(kw.toLowerCase())) return true;
+            }
+        }
+        if (desc != null) {
+            String s = desc.toString().toLowerCase();
+            for (String kw : adTexts) {
+                if (s.contains(kw.toLowerCase())) return true;
+            }
+        }
+        for (int i = 0; i < node.getChildCount(); i++) {
+            if (isReelsAdRecursive(node.getChild(i), adTexts)) return true;
+        }
+        return false;
     }
 
     // ============ 手势操作 ============
