@@ -11,7 +11,6 @@ import android.os.Looper;
 import android.provider.Settings;
 import android.widget.Button;
 import android.widget.EditText;
-import android.widget.RadioGroup;
 import android.widget.ScrollView;
 import android.widget.SeekBar;
 import android.widget.TextView;
@@ -21,7 +20,6 @@ import androidx.appcompat.app.AppCompatActivity;
 
 public class MainActivity extends AppCompatActivity {
 
-    private RadioGroup rgMode;
     private EditText etKeywords, etViewMin, etViewMax, etDuration;
     private SeekBar sbLikeProb;
     private TextView tvLikeProb, tvLog;
@@ -64,7 +62,6 @@ public class MainActivity extends AppCompatActivity {
 
             // 启动服务
             Intent intent = new Intent(this, NurtureService.class);
-            intent.putExtra("mode", getSelectedMode());
             intent.putExtra("keywords", etKeywords.getText().toString());
             intent.putExtra("likeProb", sbLikeProb.getProgress());
             intent.putExtra("viewMin", Integer.parseInt(etViewMin.getText().toString()));
@@ -82,7 +79,6 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void initViews() {
-        rgMode = findViewById(R.id.rg_mode);
         etKeywords = findViewById(R.id.et_keywords);
         etViewMin = findViewById(R.id.et_view_min);
         etViewMax = findViewById(R.id.et_view_max);
@@ -101,13 +97,6 @@ public class MainActivity extends AppCompatActivity {
             @Override public void onStartTrackingTouch(SeekBar seekBar) {}
             @Override public void onStopTrackingTouch(SeekBar seekBar) {}
         });
-    }
-
-    private String getSelectedMode() {
-        int id = rgMode.getCheckedRadioButtonId();
-        if (id == R.id.rb_reels) return "reels";
-        if (id == R.id.rb_mixed) return "mixed";
-        return "feed";
     }
 
     private boolean isAccessibilityServiceEnabled() {
@@ -134,7 +123,6 @@ public class MainActivity extends AppCompatActivity {
 
     private void saveConfig() {
         getSharedPreferences("config", MODE_PRIVATE).edit()
-            .putString("mode", getSelectedMode())
             .putString("keywords", etKeywords.getText().toString())
             .putInt("likeProb", sbLikeProb.getProgress())
             .putInt("viewMin", Integer.parseInt(etViewMin.getText().toString()))
@@ -145,11 +133,6 @@ public class MainActivity extends AppCompatActivity {
 
     private void loadConfig() {
         SharedPreferences sp = getSharedPreferences("config", MODE_PRIVATE);
-        String mode = sp.getString("mode", "mixed");
-        rgMode.check(R.id.rb_mixed);
-        if ("feed".equals(mode)) rgMode.check(R.id.rb_feed);
-        else if ("reels".equals(mode)) rgMode.check(R.id.rb_reels);
-
         etKeywords.setText(sp.getString("keywords", "爱马仕包包,Hermès bag,luxury leather bag"));
         sbLikeProb.setProgress(sp.getInt("likeProb", 60));
         tvLikeProb.setText(sbLikeProb.getProgress() + "%");
