@@ -15,37 +15,6 @@
         android:layout_gravity="center_horizontal"
         android:layout_marginBottom="16dp" />
 
-    <!-- 模式选择 -->
-    <RadioGroup
-        android:id="@+id/rg_mode"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:layout_marginBottom="12dp">
-
-        <RadioButton
-            android:id="@+id/rb_feed"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="@string/mode_feed"
-            android:checked="true" />
-
-        <RadioButton
-            android:id="@+id/rb_reels"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="@string/mode_reels" />
-
-        <RadioButton
-            android:id="@+id/rb_mixed"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="@string/mode_mixed" />
-    </RadioGroup>
-
     <!-- 关键词 -->
     <com.google.android.material.textfield.TextInputLayout
         android:layout_width="match_parent"
