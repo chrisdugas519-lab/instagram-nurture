@@ -98,6 +98,9 @@ public class NurtureService extends AccessibilityService {
                     continue;
                 }
 
+                // 等 2 秒让 Reel 文字（标题/标签/描述）加载到 accessibility tree
+                sleep(2000);
+
                 // 检测内容相关性
                 boolean relevant = isReelsRelevant();
 
@@ -268,14 +271,18 @@ public class NurtureService extends AccessibilityService {
         return findLikeButtonRecursive(root);
     }
 
+    // Like 按钮可能的描述（多语言兼容）
+    private static final String[] LIKE_DESCS = {"Like", "喜欢", "赞"};
+
     private AccessibilityNodeInfo findLikeButtonRecursive(AccessibilityNodeInfo node) {
         if (node == null) return null;
         CharSequence desc = node.getContentDescription();
         if (desc != null) {
-            String d = desc.toString();
-            // 精确匹配 "Like" 或 "喜欢"（不是 "Unlike" / "已赞"）
-            if (d.equals("Like") || d.equals("喜欢")) {
-                return node;
+            String d = desc.toString().trim();
+            for (String likeDesc : LIKE_DESCS) {
+                if (d.equals(likeDesc)) {
+                    return node;
+                }
             }
         }
         for (int i = 0; i < node.getChildCount(); i++) {
@@ -293,23 +300,45 @@ public class NurtureService extends AccessibilityService {
 
     private boolean isReelsRelevant() {
         AccessibilityNodeInfo root = getRoot();
-        if (root == null) return false;
+        if (root == null) {
+            log("  ⚠️ root 为空，无法检测相关性");
+            return false;
+        }
 
         // 收集当前页面所有文字
         StringBuilder allText = new StringBuilder();
         collectText(root, allText);
-        String pageText = allText.toString().toLowerCase();
+        String pageText = normalizeKeyword(allText.toString());
+
+        // 调试：截取前 200 字符显示到日志，方便排查为什么没匹配
+        String preview = pageText.length() > 200 ? pageText.substring(0, 200) + "..." : pageText;
+        log("  🔍 页面文字: " + preview.replace('\n', ' '));
 
         matchedKeywords = null;
         for (String kw : keywords) {
-            String k = kw.trim().toLowerCase();
+            String k = normalizeKeyword(kw.trim());
             if (k.isEmpty()) continue;
             if (pageText.contains(k)) {
                 matchedKeywords = new String[]{kw.trim()};
+                log("  ✅ 匹配到关键词: " + kw.trim());
                 return true;
             }
         }
+        log("  ⏭️ 未匹配任何关键词");
         return false;
+    }
+
+    // 关键词标准化：统一小写 + 去除变音符号（如 Hermès → hermes）
+    private String normalizeKeyword(String kw) {
+        if (kw == null) return "";
+        String s = kw.toLowerCase();
+        // 去除常见变音符号
+        s = s.replace("è", "e").replace("é", "e").replace("ê", "e").replace("ë", "e");
+        s = s.replace("à", "a").replace("á", "a").replace("â", "a").replace("ä", "a");
+        s = s.replace("ò", "o").replace("ó", "o").replace("ô", "o").replace("ö", "o");
+        s = s.replace("ù", "u").replace("ú", "u").replace("û", "u").replace("ü", "u");
+        s = s.replace("ì", "i").replace("í", "i").replace("î", "i").replace("ï", "i");
+        return s;
     }
 
     private void collectText(AccessibilityNodeInfo node, StringBuilder sb) {
@@ -414,39 +443,54 @@ public class NurtureService extends AccessibilityService {
     // ============ Reels 专用点赞 ============
     // 核心原理：Reels 点赞必须点击右侧的 Like 按钮（❤️ 图标），
     // 绝对不能双击屏幕（会触发暂停），也不能点击屏幕中间（也是暂停）。
-    // 兜底方案：如果找不到 Like 按钮，尝试点击屏幕右侧 85%~92% 的区域
-    // 但该区域不是点赞按钮就跳过，避免误触暂停。
+    // 最可靠方式：用 Accessibility 的 ACTION_CLICK 直接点 Like 节点，
+    // 不依赖坐标（爱心位置会变），由系统精确定位。
 
     private void likeReels() {
         log("  ❤️ Reels 点赞...");
-        sleep(300); // 短暂延迟，确保 Reel 已完全加载
+        sleep(500); // 确保 Reel 已完全加载
 
-        // 方案1：通过 Accessibility 找到 Like 按钮（最可靠）
+        // 方案1：找到 Like 节点并执行原生点击（不依赖坐标）
         AccessibilityNodeInfo btn = findLikeButton();
         if (btn != null) {
-            Rect rect = new Rect();
-            btn.getBoundsInScreen(rect);
-            // 确保按钮在屏幕右侧区域（Reels 爱心按钮在右边）
-            int cx = rect.centerX();
-            int cy = rect.centerY();
-            log("  ❤️ 找到 Like 按钮 (" + cx + ", " + cy + ")，点击");
-            clickXY(cx, cy);
+            log("  ❤️ 找到 Like 按钮，执行原生点击");
+            boolean clicked = btn.performAction(AccessibilityNodeInfo.ACTION_CLICK);
             sleep(500);
-            // 验证：再次查找，如果变成 "Unlike" 说明点赞成功
+            if (clicked) {
+                log("  ✅ 已触发点击");
+            } else {
+                log("  ⚠️ ACTION_CLICK 返回 false，尝试手势点击");
+                fallbackLikeClick(btn);
+            }
+            // 验证是否变为 Unlike
             AccessibilityNodeInfo check = findUnlikeButton();
             if (check != null) {
                 log("  ✅ 点赞成功（已变为 Unlike）");
             } else {
-                log("  ⚠️ 点击后未确认点赞成功");
+                log("  ⚠️ 未确认点赞状态");
             }
             return;
         }
 
         // 方案2：如果找不到 Like 按钮，尝试按坐标点击右侧爱心位置
-        // Reels 爱心按钮通常在屏幕右侧 x=85%~90%, y=55%~65%
-        int likeX = (int)(screenW * 0.88) + randInt(-15, 15);
-        int likeY = (int)(screenH * 0.60) + randInt(-20, 20);
-        log("  ❤️ 未找到 Like 按钮，尝试坐标点击 (" + likeX + ", " + likeY + ")");
+        log("  ❤️ 未找到 Like 按钮，尝试坐标兜底");
+        fallbackLikeClick(null);
+    }
+
+    // 兜底点击：坐标点击 + 位置随机，但范围在右侧
+    private void fallbackLikeClick(AccessibilityNodeInfo btn) {
+        int likeX, likeY;
+        if (btn != null) {
+            Rect rect = new Rect();
+            btn.getBoundsInScreen(rect);
+            likeX = rect.centerX();
+            likeY = rect.centerY();
+        } else {
+            // Reels 爱心按钮通常在屏幕右侧 x=85%~92%, y=55%~65%
+            likeX = (int)(screenW * 0.88) + randInt(-15, 15);
+            likeY = (int)(screenH * 0.60) + randInt(-20, 20);
+        }
+        log("  🖱️ 坐标点击 (" + likeX + ", " + likeY + ")");
         clickXY(likeX, likeY);
         sleep(500);
     }
@@ -457,13 +501,18 @@ public class NurtureService extends AccessibilityService {
         return findUnlikeButtonRecursive(root);
     }
 
+    // Unlike（已赞）按钮可能的描述
+    private static final String[] UNLIKE_DESCS = {"Unlike", "已赞", "取消赞"};
+
     private AccessibilityNodeInfo findUnlikeButtonRecursive(AccessibilityNodeInfo node) {
         if (node == null) return null;
         CharSequence desc = node.getContentDescription();
         if (desc != null) {
-            String d = desc.toString();
-            if (d.equals("Unlike") || d.equals("已赞") || d.equals("取消赞")) {
-                return node;
+            String d = desc.toString().trim();
+            for (String unlikeDesc : UNLIKE_DESCS) {
+                if (d.equals(unlikeDesc)) {
+                    return node;
+                }
             }
         }
         for (int i = 0; i < node.getChildCount(); i++) {
