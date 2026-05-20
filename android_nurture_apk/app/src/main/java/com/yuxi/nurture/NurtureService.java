@@ -80,13 +80,15 @@ public class NurtureService extends AccessibilityService {
 
             int reelIndex = 0;
             int adCount = 0;
+            int relevantCount = 0;
+            int skipCount = 0;
             while (System.currentTimeMillis() < endTime && isRunning) {
                 reelIndex++;
 
                 // 检测广告：遇到广告直接跳过，不观看、不点赞
                 if (isReelsAd()) {
                     adCount++;
-                    log("  🚫 检测到广告 (#" + adCount + ")，直接跳过");
+                    log("  🚫 广告 #" + adCount + "，跳过");
                     int swipeDur = randInt(400, 700);
                     int x = screenW / 2 + randInt(-30, 30);
                     int sy = (int)(screenH * 0.75);
@@ -96,14 +98,26 @@ public class NurtureService extends AccessibilityService {
                     continue;
                 }
 
-                int watchDur = randInt(viewMin, viewMax);
-                log("  📹 第 " + reelIndex + " 个 Reel - 观看 " + watchDur + "秒");
-                interruptibleSleep(watchDur, watchDur);
-                if (!isRunning) break;
+                // 检测内容相关性
+                boolean relevant = isReelsRelevant();
 
-                // 点赞
-                if (random.nextInt(100) < likeProb) {
-                    likeReels();
+                if (relevant) {
+                    // 命中关键词 → 完整观看 + 高概率点赞
+                    relevantCount++;
+                    int watchDur = randInt(viewMin, viewMax);
+                    log("  🎯 第 " + reelIndex + " 个 Reel - 命中 [" + String.join(",", matchedKeywords) + "] 观看 " + watchDur + "秒");
+                    interruptibleSleep(watchDur, watchDur);
+                    if (!isRunning) break;
+
+                    // 高概率点赞（80%）
+                    if (random.nextInt(100) < 80) {
+                        likeReels();
+                    }
+                } else {
+                    // 未命中关键词 → 只看 3 秒就跳过
+                    skipCount++;
+                    log("  ⏭️ 第 " + reelIndex + " 个 Reel - 不相关，3秒跳过");
+                    interruptibleSleep(3, 3);
                 }
 
                 // 上划切换下一个 Reel（400-700ms）
@@ -128,7 +142,10 @@ public class NurtureService extends AccessibilityService {
 
             pressBack();
             closeInstagram();
-            log("✅ 养号完成！共观看 " + reelIndex + " 个 Reels，跳过广告 " + adCount + " 次");
+            log("✅ 养号完成！共 " + reelIndex + " 个 Reels");
+            log("  🎯 命中关键词: " + relevantCount + " 个（完整观看+点赞）");
+            log("  ⏭️ 不相关跳过: " + skipCount + " 个（3秒跳过）");
+            log("  🚫 广告跳过: " + adCount + " 个");
 
         } catch (Exception e) {
             log("❌ 错误: " + e.getMessage());
@@ -266,6 +283,55 @@ public class NurtureService extends AccessibilityService {
             if (result != null) return result;
         }
         return null;
+    }
+
+    // ============ Reels 内容相关性检测 ============
+    // 读取当前 Reel 页面的所有文字（标题、描述、标签等），
+    // 匹配用户设定的关键词。匹配到 = 目标内容，没匹配 = 不相关。
+
+    private String[] matchedKeywords; // 记录匹配到的关键词，供日志显示
+
+    private boolean isReelsRelevant() {
+        AccessibilityNodeInfo root = getRoot();
+        if (root == null) return false;
+
+        // 收集当前页面所有文字
+        StringBuilder allText = new StringBuilder();
+        collectText(root, allText);
+        String pageText = allText.toString().toLowerCase();
+
+        matchedKeywords = null;
+        for (String kw : keywords) {
+            String k = kw.trim().toLowerCase();
+            if (k.isEmpty()) continue;
+            if (pageText.contains(k)) {
+                matchedKeywords = new String[]{kw.trim()};
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private void collectText(AccessibilityNodeInfo node, StringBuilder sb) {
+        if (node == null) return;
+        // 读取 text 属性
+        CharSequence txt = node.getText();
+        if (txt != null && txt.length() > 0) {
+            sb.append(txt.toString()).append(" ");
+        }
+        // 读取 contentDescription 属性（很多 IG 元素用这个）
+        CharSequence desc = node.getContentDescription();
+        if (desc != null && desc.length() > 0) {
+            sb.append(desc.toString()).append(" ");
+        }
+        // 读取 hint 属性
+        CharSequence hint = node.getHintText();
+        if (hint != null && hint.length() > 0) {
+            sb.append(hint.toString()).append(" ");
+        }
+        for (int i = 0; i < node.getChildCount(); i++) {
+            collectText(node.getChild(i), sb);
+        }
     }
 
     // ============ Reels 广告检测 ============
