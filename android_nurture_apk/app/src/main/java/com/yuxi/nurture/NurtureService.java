@@ -121,12 +121,20 @@ public class NurtureService extends AccessibilityService {
                 swipeUp();
                 sleep(randInt(1500, 2500));
 
-                // 偶尔检查是否离开了 IG
-                if (reelIndex % 8 == 0 && !isInInstagram()) {
-                    log("  ⚠️ 离开 IG，尝试返回");
+                // 每次 swipe 后检查是否还在 Reels，不在则恢复
+                if (isOnHomeFeed()) {
+                    log("  ⚠️ 检测到在首页，重新进入 Reels");
+                    navigateToReels();
+                    sleep(randInt(1500, 2500));
+                } else if (reelIndex % 5 == 0 && !isInInstagram()) {
+                    log("  ⚠️ 离开 IG，尝试返回并重进 Reels");
                     pressBack();
                     sleep(800);
                     navigateToReels();
+                }
+                // 偶尔检查 Reels tab 是否还 active（防止被导航到其他 tab）
+                if (reelIndex % 12 == 0) {
+                    revalidateReelsTab();
                 }
             }
 
@@ -151,63 +159,84 @@ public class NurtureService extends AccessibilityService {
     }
 
     // ============ 点开底部描述栏 ============
-    // ⚠️ 严禁找 "更多"/"more" 文本 — Reels 右上 overflow 菜单也有 "更多" 文字，
-    //    点下去会弹出「不感兴趣/举报」，导致完全错误的行为。
+    // ⚠️ 严禁找 "更多"/"more" 文本 — Reels 右上 overflow 菜单也有 "更多" 文字
+    // ⚠️ 严禁点作者头像/名字区域 — 那是跳个人主页的，不是开详情
     //
-    // 正确策略：找 Reels 底部描述区域的 clickable 节点（含作者名+标题文字），
-    //           或者用坐标直接点底部左侧的标题区域。
+    // Reels 底部布局（从左到右）：
+    //   [作者头像 0~12%] [作者名 12%~20%] [描述文字 20%~55%] ... [❤️ 赞 80%+] ... [底部导航栏 0~100%, y>93%]
+    //
+    // 正确策略：坐标点描述文字区（x=28%~48%, y=88%~92%），
+    //           这个区间避开了作者头像/名字和右侧互动按钮，也避开了底部导航栏。
 
     private boolean openReelDescription() {
+        // 方案1：精确定位底部描述区的 clickable 节点（需排除作者节点）
         AccessibilityNodeInfo root = getRoot();
-        if (root == null) return false;
+        if (root != null) {
+            AccessibilityNodeInfo captionNode = findBottomCaptionNode(root);
+            if (captionNode != null) {
+                log("  📖 点击底部描述节点");
+                captionNode.performAction(AccessibilityNodeInfo.ACTION_CLICK);
+                sleep(800);
 
-        // 方案1：精确定位底部描述区的 clickable 节点
-        AccessibilityNodeInfo captionNode = findBottomCaptionNode(root);
-        if (captionNode != null) {
-            log("  📖 点击底部描述节点");
-            captionNode.performAction(AccessibilityNodeInfo.ACTION_CLICK);
-            sleep(800);
-            if (isDetailPageOpen()) {
-                log("  ✅ 详情已打开（节点点击）");
-                return true;
+                if (isOnProfilePage()) {
+                    // 点到作者头像/名字了！立刻 back 回 Reels
+                    log("  ⚠️ 误入个人主页，pressBack 返回");
+                    pressBack();
+                    sleep(500);
+                } else if (isDetailPageOpen()) {
+                    log("  ✅ 详情已打开（节点点击）");
+                    return true;
+                } else {
+                    log("  ⚠️ 节点点击未打开详情，dismiss");
+                    dismissOverlayMenu();
+                }
             }
-            // 如果点击了但没打开详情（可能弹出了别的菜单），先 dismiss
-            log("  ⚠️ 节点点击未打开详情，尝试 dismiss 后坐标兜底");
-            dismissOverlayMenu();
         }
 
-        // 方案2：坐标点击底部左侧描述文字区域
-        // 选左侧（x=10%~35%）避免点到右侧互动按钮，选偏下（y=87%~93%）对准标题行
-        // 不能点太右（会点到赞/评论/分享按钮），不能点太左（有些设备有导航栏）
-        int tx = (int)(screenW * 0.18) + randInt(-15, 15);
-        int ty = (int)(screenH * 0.90) + randInt(-10, 10);
-        log("  📖 坐标点击底部描述区 (" + tx + ", " + ty + ")");
+        // 方案2：坐标点击描述文字区（安全区间：x=28%~48%, y=88%~92%）
+        // 这个位置在作者名字右侧、赞按钮左侧，精准命中描述文字
+        int tx = (int)(screenW * 0.35) + randInt(-15, 15);
+        int ty = (int)(screenH * 0.895) + randInt(-8, 8);
+        log("  📖 坐标点击描述区 (" + tx + ", " + ty + ")");
         clickXY(tx, ty);
         sleep(800);
 
+        // 检查结果
+        if (isOnProfilePage()) {
+            log("  ⚠️ 坐标点到了作者区，pressBack 返回");
+            pressBack();
+            sleep(500);
+            return false;
+        }
+        if (isOnHashTagPage()) {
+            log("  ⚠️ 误入话题页，pressBack 返回");
+            pressBack();
+            sleep(500);
+            return false;
+        }
         if (isDetailPageOpen()) {
             log("  ✅ 详情已打开（坐标点击）");
             return true;
         }
-
-        // 如果点到了话题标签（跳转到了话题页），按 back 返回
-        if (isOnHashTagPage()) {
-            log("  ⚠️ 误入话题页，按 back 返回");
-            pressBack();
-            sleep(500);
-            return false; // 这次算了，直接划走
+        // 如果点到主页后又 back，可能在首页；检测并恢复到 Reels
+        if (isOnHomeFeed()) {
+            log("  ⚠️ 似乎回到了首页，重新进入 Reels");
+            navigateToReels();
+            sleep(randInt(1500, 2500));
+            return false;
         }
 
-        log("  ⚠️ 详情未打开（坐标点击失败）");
+        log("  ⚠️ 详情未打开");
         return false;
     }
 
-    // 在可见树中寻找底部 20% 区域内的 clickable 节点（描述行）
+    // 在可见树中寻找底部区域的 caption 节点（排除作者头像/名字）
+    // ⚠️ 底部左侧有两个紧挨的 clickable 区域：作者信息（跳主页）、描述文字（开详情）
+    //    必须排除作者节点，否则会误入个人主页导致整个流程跑偏
     private AccessibilityNodeInfo findBottomCaptionNode(AccessibilityNodeInfo node) {
         if (node == null) return null;
         int bottomMinY = (int)(screenH * 0.80);
 
-        // BFS 收集所有在底部区域的 clickable 节点
         java.util.List<AccessibilityNodeInfo> candidates = new java.util.ArrayList<>();
         collectCaptionCandidates(node, bottomMinY, candidates);
 
@@ -216,10 +245,6 @@ public class NurtureService extends AccessibilityService {
             return null;
         }
 
-        // 优先级：
-        // 1. 在左侧（x < 65%屏幕宽）且不含 "音频" "音乐" "Audio" "原声"
-        // 2. text 非空优先于 desc 非空
-        // 3. 面积不要太大（排除整个底部 bar）
         AccessibilityNodeInfo best = null;
         int bestScore = -1;
         for (AccessibilityNodeInfo c : candidates) {
@@ -227,26 +252,44 @@ public class NurtureService extends AccessibilityService {
             c.getBoundsInScreen(r);
             int area = (r.right - r.left) * (r.bottom - r.top);
 
-            // 排除音频节点
+            // === 排除规则 ===
             CharSequence cd = c.getContentDescription();
             String cdStr = cd != null ? cd.toString().toLowerCase() : "";
+
+            // 1. 排除音频节点
             if (cdStr.contains("音频") || cdStr.contains("audio") ||
                 cdStr.contains("原声") || cdStr.contains("original") ||
-                cdStr.contains("音乐") || cdStr.contains("music")) {
-                continue;
-            }
+                cdStr.contains("音乐") || cdStr.contains("music")) continue;
 
+            // 2. 排除作者头像/个人主页相关
+            if (cdStr.contains("查看用户") || cdStr.contains("view user") ||
+                cdStr.contains("个人主页") || cdStr.contains("profile") ||
+                cdStr.contains("查看个人") || cdStr.contains("用户")) continue;
+
+            // 3. 排除太靠左的小节点（作者头像约在 x=0~12% 且面积很小，如圆形头像）
+            if (r.left < screenW * 0.15 && area < 12000) continue;
+
+            // 4. 排除 ImageView 类节点（作者头像是 ImageView）
+            String clsName = c.getClassName() != null ? c.getClassName().toString().toLowerCase() : "";
+            if (clsName.contains("imageview") || clsName.contains("image")) continue;
+
+            // === 评分规则 ===
             int score = 0;
-            // 左侧加分
-            if (r.left < screenW * 0.65) score += 10;
-            // text 优先
+            // 左侧但不太靠左加分（中间偏左 = 描述文字区）
+            if (r.left >= screenW * 0.18 && r.left < screenW * 0.55) score += 10;
+            // 太靠左（x < 15%）减分（作者区）
+            if (r.left < screenW * 0.15) score -= 25;
+            // text 非空且有一定长度加分（短文字通常是用户名）
             CharSequence txt = c.getText();
-            if (txt != null && txt.length() > 0) score += 5;
-            // 面积不能太大（整个底部栏 > 30% 屏幕面积）也不能太小
+            int txtLen = txt != null ? txt.length() : 0;
+            if (txtLen >= 15) score += 12;      // 长文字=描述
+            else if (txtLen >= 5) score += 4;    // 中等=可能是描述片段
+            else score -= 8;                      // 很短或无=可能是用户名
+            // 面积适中加分
             int maxArea = (int)(screenW * screenH * 0.20);
-            if (area > 100 && area < maxArea) score += 2;
-            // 越靠近底部越优先
-            if (r.top > screenH * 0.86) score += 3;
+            if (area > 500 && area < maxArea) score += 2;
+            // 在底部区域中间 y 范围加分
+            if (r.top > screenH * 0.85 && r.top < screenH * 0.94) score += 3;
 
             if (score > bestScore) {
                 bestScore = score;
@@ -256,7 +299,10 @@ public class NurtureService extends AccessibilityService {
         if (best != null) {
             Rect r = new Rect();
             best.getBoundsInScreen(r);
-            log("  📍 选中候选: bounds=(" + r.left + "," + r.top + "-" + r.right + "," + r.bottom + "), score=" + bestScore);
+            log("  📍 选中候选: bounds=(" + r.left + "," + r.top + "-" + r.right + "," + r.bottom + "), class="
+                + (best.getClassName() != null ? best.getClassName().toString() : "?")
+                + ", text=" + (best.getText() != null ? best.getText().toString().substring(0, Math.min(30, best.getText().length())) : "N/A")
+                + ", score=" + bestScore);
         }
         return best;
     }
@@ -288,8 +334,47 @@ public class NurtureService extends AccessibilityService {
             || text.contains("查看") || text.contains("view");
     }
 
-    // 检测是否误入了话题标签页
-    private boolean isOnHashTagPage() {
+    // 检测是否误入了个人主页
+    private boolean isOnProfilePage() {
+        AccessibilityNodeInfo root = getRoot();
+        if (root == null) return false;
+        StringBuilder sb = new StringBuilder();
+        collectText(root, sb);
+        String text = sb.toString();
+        // 主页特征：有「帖子」「粉丝」「正在关注」、有「编辑主页」或「分享主页」
+        boolean hasPosts = text.contains("帖子") || text.contains("posts") || text.contains("貼文");
+        boolean hasFollowers = text.contains("粉丝") || text.contains("followers") || text.contains("粉絲");
+        boolean hasFollowing = text.contains("正在关注") || text.contains("following") || text.contains("追蹤中");
+        boolean hasEditOrShare = text.contains("编辑主页") || text.contains("edit profile")
+                              || text.contains("分享主页") || text.contains("share profile")
+                              || text.contains("編輯個人資料");
+        return (hasPosts && hasFollowers && hasFollowing) || hasEditOrShare;
+    }
+
+    // 检测是否在首页 Feed（非 Reels）
+    private boolean isOnHomeFeed() {
+        AccessibilityNodeInfo root = getRoot();
+        if (root == null) return false;
+        // 首页特征：底部有"首页"按钮高亮 + 上面是贴文列表（不是全屏视频）
+        // 简单判断：没有 fullscreen Reels 特征 + 有"首页"相关节点
+        // 更可靠：找是否有 Reels 标识；没有 Reels 标识但有"首页"=在首页
+        String pkg = root.getPackageName() != null ? root.getPackageName().toString() : "";
+        if (!pkg.contains("instagram")) return false;
+
+        // 检测是否有 Reels 全屏特征文字
+        StringBuilder sb = new StringBuilder();
+        collectText(root, sb);
+        String text = sb.toString();
+        boolean isReelsMode = text.contains("Reels") || text.contains("reels");
+        boolean hasHomeActive = false;
+        // 找底部导航栏"首页"是否处于 active 状态
+        AccessibilityNodeInfo homeTab = findNodeByTextContains("首页");
+        if (homeTab == null) homeTab = findNodeByTextContains("主頁");
+        if (homeTab != null) {
+            hasHomeActive = homeTab.isSelected() || homeTab.isFocused();
+        }
+        return !isReelsMode && hasHomeActive;
+    }
         AccessibilityNodeInfo root = getRoot();
         if (root == null) return false;
         StringBuilder sb = new StringBuilder();
@@ -409,6 +494,21 @@ public class NurtureService extends AccessibilityService {
             smartTap((int)(screenW * 0.30), (int)(screenH * 0.95), "Reels兜底");
         }
         sleep(randInt(2500, 3500));
+    }
+
+    // 确认当前仍在 Reels tab，不在则重新进入
+    private void revalidateReelsTab() {
+        AccessibilityNodeInfo root = getRoot();
+        if (root == null) return;
+        StringBuilder sb = new StringBuilder();
+        collectText(root, sb);
+        String text = sb.toString();
+        // 如果收集的文字中找不到任何 Reels 特征且不在详情页，可能跑偏了
+        boolean inReels = text.contains("Reels") || text.contains("reels") || isDetailPageOpen();
+        if (!inReels && isInInstagram()) {
+            log("  🔄 Reels tab 丢失，重新进入");
+            navigateToReels();
+        }
     }
 
     private boolean isInInstagram() {
@@ -611,10 +711,11 @@ public class NurtureService extends AccessibilityService {
     // ============ 手势操作 ============
 
     private void swipeUp() {
-        int dur = randInt(400, 700);
-        int x = screenW / 2 + randInt(-30, 30);
-        int sy = (int)(screenH * 0.75);
-        int ey = (int)(screenH * 0.25);
+        int dur = randInt(350, 600);
+        int x = screenW / 2 + randInt(-25, 25);
+        // ⚠️ sy 不能太低（y=75% 以下可能碰到底部导航栏），ey 不能太高
+        int sy = (int)(screenH * 0.68) + randInt(-15, 15);
+        int ey = (int)(screenH * 0.30) + randInt(-15, 15);
         log("  ⬆️ 上划 (" + dur + "ms)");
         swipeXY(x, sy, x, ey, dur);
     }
