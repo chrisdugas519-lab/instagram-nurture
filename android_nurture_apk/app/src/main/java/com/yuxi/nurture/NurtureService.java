@@ -1,6 +1,6 @@
 package com.yuxi.nurture;
 
-// v4.5: isOnHomeFeed用底部NavBar tab选中态+navigateToReels三方案+dismissDetail后验证恢复
+// v4.6: 最简模式 - 只刷Reels，不点详情，先验证基础流程
 
 import android.accessibilityservice.AccessibilityService;
 import android.accessibilityservice.GestureDescription;
@@ -49,111 +49,47 @@ public class NurtureService extends AccessibilityService {
     @Override public void onInterrupt() { isRunning = false; }
 
     // ============ 核心养号流程 ============
-    // 策略：广告直接划走 → 正常视频先看几秒 → 点开底部描述栏
-    //       → 详情里检测关键词 → 命中就点赞 → 关掉返回 → 继续下一个
+    // v4.6 最简模式：打开IG → 点Reels → 无脑swipeUp刷，不点详情不检测关键词
+    // 先验证基础流程正常，再逐步加回精准养号功能
 
     private void runNurtureSession() {
         log("=====");
-        log("🚀 开始养号 - 精准 Reels 模式");
+        log("🚀 开始养号 - 最简Reels模式 v4.6");
         log("屏幕: " + screenW + "x" + screenH);
-        log("关键词: " + String.join(", ", keywords));
-        log("策略: 广告划走 / 正常视频看几秒→点开详情→关键词点赞");
+        log("策略: 只刷Reels，不点详情，不检测关键词");
         log("=====");
 
         long endTime = System.currentTimeMillis() + duration * 60 * 1000L;
 
         try {
             if (!openInstagram()) { log("❌ 打开 IG 失败"); return; }
-            sleep(randInt(2000, 3000));
-            navigateToReels();
+            sleep(randInt(3000, 5000));
 
-            int reelIndex = 0, adCount = 0, likedCount = 0, watchedCount = 0;
+            // 进入Reels
+            navigateToReels();
+            sleep(randInt(2000, 3000));
+
+            int reelIndex = 0;
 
             while (System.currentTimeMillis() < endTime && isRunning) {
                 reelIndex++;
                 log("--- Reel #" + reelIndex + " ---");
 
-                // 0. 强制确认在 Reels 里（每次循环必检查）
-                if (isOnHomeFeed() || isOnProfilePage()) {
-                    log("  ⚠️ 偏移检测：不在 Reels，执行恢复");
-                    if (isOnProfilePage()) {
-                        pressBack();
-                        sleep(800);
-                    }
-                    navigateToReels();
-                    sleep(randInt(1500, 2500));
-                    // 恢复后跳过本轮（页面可能还没稳定）
-                    if (isOnHomeFeed()) {
-                        log("  ⚠️ 恢复失败，跳过本轮");
-                        continue;
-                    }
-                }
-
-                // 1. 先检测广告，是广告直接划走
-                if (isReelsAd()) {
-                    adCount++;
-                    log("  🚫 广告，直接划走");
-                    swipeUp();
-                    sleep(randInt(1500, 2500));
-                    continue;
-                }
-
-                // 2. 正常视频：先看几秒（3~5秒），让 IG 算法记录观看行为
-                int quickWatch = randInt(3, 5);
-                log("  👀 先观看 " + quickWatch + " 秒...");
-                interruptibleSleep(quickWatch, quickWatch);
+                // 简单看几秒然后划走
+                int watchTime = randInt(3, 6);
+                log("  👀 观看 " + watchTime + " 秒...");
+                interruptibleSleep(watchTime, watchTime);
                 if (!isRunning) break;
 
-                // 3. 点开底部描述栏（标题那一行）
-                boolean opened = openReelDescription();
-                if (opened) {
-                    // 3.5 再次检测广告（有些广告在详情页才会露出广告文案如"购买微信"）
-                    if (isReelsAd()) {
-                        adCount++;
-                        log("  🚫 详情页检测到广告，关闭并划走");
-                        dismissDetail();
-                        swipeUp();
-                        sleep(randInt(1500, 2500));
-                        continue;
-                    }
-
-                    // 4. 在详情页检测关键词
-                    sleep(1000); // 等详情内容完全渲染
-                    String matchedKw = detectKeywordInDetail();
-                    if (matchedKw != null) {
-                        // 5. 命中关键词：关详情 → 点赞（按用户设定概率）
-                        log("  🎯 命中关键词 [" + matchedKw + "]");
-                        dismissDetail();
-                        if (random.nextInt(100) < likeProb) {
-                            likeReels();
-                            likedCount++;
-                        } else {
-                            log("  🎲 概率跳过点赞");
-                        }
-                        // 命中了多看一会再划走
-                        watchedCount++;
-                        int extraWatch = randInt(viewMin, viewMax);
-                        log("  📺 命中，继续看 " + extraWatch + " 秒");
-                        interruptibleSleep(extraWatch, extraWatch);
-                    } else {
-                        // 没命中：关掉详情，直接划走
-                        log("  ⏭️ 无关键词，关闭详情划走");
-                        dismissDetail();
-                    }
-                } else {
-                    // 没找到描述栏 / 误入话题页/主页，直接划走
-                    log("  ⏭️ 未打开详情，划走");
-                }
-
-                // 6. 上划切换下一个
+                // 上划下一个
                 swipeUp();
-                sleep(randInt(1500, 2500));
+                sleep(randInt(1200, 2000));
 
-                // 每 5 轮检查一次是否离开 IG
-                if (reelIndex % 5 == 0 && !isInInstagram()) {
+                // 每10轮检查一次是否还在IG
+                if (reelIndex % 10 == 0 && !isInInstagram()) {
                     log("  ⚠️ 离开 IG，尝试返回");
                     pressBack();
-                    sleep(800);
+                    sleep(1000);
                     navigateToReels();
                 }
             }
@@ -161,10 +97,7 @@ public class NurtureService extends AccessibilityService {
             pressBack();
             closeInstagram();
             log("=====");
-            log("✅ 养号完成！共处理 " + reelIndex + " 个 Reels");
-            log("  ❤️ 点赞: " + likedCount + " 次");
-            log("  📺 完整观看（命中关键词）: " + watchedCount + " 个");
-            log("  🚫 广告跳过: " + adCount + " 个");
+            log("✅ 养号完成！共刷 " + reelIndex + " 个 Reels");
             log("=====");
 
         } catch (Exception e) {
@@ -176,393 +109,6 @@ public class NurtureService extends AccessibilityService {
                 if (MainActivity.instance != null) MainActivity.instance.runOnUiThread(() -> {});
             });
         }
-    }
-
-    // ============ 点开底部描述栏 ============
-    // ⚠️ 严禁找 "更多"/"more" 文本 — Reels 右上 overflow 菜单也有 "更多" 文字
-    // ⚠️ 严禁点作者头像/名字区域 — 那是跳个人主页的，不是开详情
-    //
-    // Reels 底部布局（从左到右）：
-    //   [作者头像 0~12%] [作者名 12%~20%] [描述文字 20%~55%] ... [❤️ 赞 80%+] ... [底部导航栏 0~100%, y>93%]
-    //
-    // 正确策略：坐标点描述文字区（x=28%~48%, y=88%~92%），
-    //           这个区间避开了作者头像/名字和右侧互动按钮，也避开了底部导航栏。
-
-    private boolean openReelDescription() {
-        // 方案1：精确定位底部描述区的 clickable 节点（需排除作者节点）
-        AccessibilityNodeInfo root = getRoot();
-        if (root != null) {
-            AccessibilityNodeInfo captionNode = findBottomCaptionNode(root);
-            if (captionNode != null) {
-                log("  📖 点击底部描述节点");
-                captionNode.performAction(AccessibilityNodeInfo.ACTION_CLICK);
-                sleep(800);
-
-                if (isOnProfilePage()) {
-                    // 点到作者头像/名字了！立刻 back 回 Reels
-                    log("  ⚠️ 误入个人主页，pressBack 返回");
-                    pressBack();
-                    sleep(500);
-                } else if (isDetailPageOpen()) {
-                    log("  ✅ 详情已打开（节点点击）");
-                    return true;
-                } else {
-                    log("  ⚠️ 节点点击未打开详情，dismiss");
-                    dismissOverlayMenu();
-                }
-            }
-        }
-
-        // 方案2：坐标点击描述文字区（安全区间：x=28%~48%, y=88%~92%）
-        // 这个位置在作者名字右侧、赞按钮左侧，精准命中描述文字
-        int tx = (int)(screenW * 0.35) + randInt(-15, 15);
-        int ty = (int)(screenH * 0.895) + randInt(-8, 8);
-        log("  📖 坐标点击描述区 (" + tx + ", " + ty + ")");
-        clickXY(tx, ty);
-        sleep(800);
-
-        // 检查结果
-        if (isOnProfilePage()) {
-            log("  ⚠️ 坐标点到了作者区，pressBack 返回");
-            pressBack();
-            sleep(500);
-            return false;
-        }
-        if (isOnHashTagPage()) {
-            log("  ⚠️ 误入话题页，pressBack 返回");
-            pressBack();
-            sleep(500);
-            return false;
-        }
-        if (isDetailPageOpen()) {
-            log("  ✅ 详情已打开（坐标点击）");
-            return true;
-        }
-        // 如果点到主页后又 back，可能在首页；检测并恢复到 Reels
-        if (isOnHomeFeed()) {
-            log("  ⚠️ 似乎回到了首页，重新进入 Reels");
-            navigateToReels();
-            sleep(randInt(1500, 2500));
-            return false;
-        }
-
-        log("  ⚠️ 详情未打开");
-        return false;
-    }
-
-    // 在可见树中寻找底部区域的 caption 节点（排除作者头像/名字）
-    // ⚠️ 底部左侧有两个紧挨的 clickable 区域：作者信息（跳主页）、描述文字（开详情）
-    //    必须排除作者节点，否则会误入个人主页导致整个流程跑偏
-    private AccessibilityNodeInfo findBottomCaptionNode(AccessibilityNodeInfo node) {
-        if (node == null) return null;
-        int bottomMinY = (int)(screenH * 0.80);
-
-        java.util.List<AccessibilityNodeInfo> candidates = new java.util.ArrayList<>();
-        collectCaptionCandidates(node, bottomMinY, candidates);
-
-        if (candidates.isEmpty()) {
-            log("  ⚠️ 底部区域未找到候选节点");
-            return null;
-        }
-
-        AccessibilityNodeInfo best = null;
-        int bestScore = -1;
-        for (AccessibilityNodeInfo c : candidates) {
-            Rect r = new Rect();
-            c.getBoundsInScreen(r);
-            int area = (r.right - r.left) * (r.bottom - r.top);
-
-            // === 排除规则 ===
-            CharSequence cd = c.getContentDescription();
-            String cdStr = cd != null ? cd.toString().toLowerCase() : "";
-
-            // 1. 排除音频节点
-            if (cdStr.contains("音频") || cdStr.contains("audio") ||
-                cdStr.contains("原声") || cdStr.contains("original") ||
-                cdStr.contains("音乐") || cdStr.contains("music")) continue;
-
-            // 2. 排除作者头像/个人主页相关
-            if (cdStr.contains("查看用户") || cdStr.contains("view user") ||
-                cdStr.contains("个人主页") || cdStr.contains("profile") ||
-                cdStr.contains("查看个人") || cdStr.contains("用户")) continue;
-
-            // 3. 排除太靠左的小节点（作者头像约在 x=0~12% 且面积很小，如圆形头像）
-            if (r.left < screenW * 0.15 && area < 12000) continue;
-
-            // 4. 排除 ImageView 类节点（作者头像是 ImageView）
-            String clsName = c.getClassName() != null ? c.getClassName().toString().toLowerCase() : "";
-            if (clsName.contains("imageview") || clsName.contains("image")) continue;
-
-            // === 评分规则 ===
-            int score = 0;
-            // 左侧但不太靠左加分（中间偏左 = 描述文字区）
-            if (r.left >= screenW * 0.18 && r.left < screenW * 0.55) score += 10;
-            // 太靠左（x < 15%）减分（作者区）
-            if (r.left < screenW * 0.15) score -= 25;
-            // text 非空且有一定长度加分（短文字通常是用户名）
-            CharSequence txt = c.getText();
-            int txtLen = txt != null ? txt.length() : 0;
-            if (txtLen >= 15) score += 12;      // 长文字=描述
-            else if (txtLen >= 5) score += 4;    // 中等=可能是描述片段
-            else score -= 8;                      // 很短或无=可能是用户名
-            // 面积适中加分
-            int maxArea = (int)(screenW * screenH * 0.20);
-            if (area > 500 && area < maxArea) score += 2;
-            // 在底部区域中间 y 范围加分
-            if (r.top > screenH * 0.85 && r.top < screenH * 0.94) score += 3;
-
-            if (score > bestScore) {
-                bestScore = score;
-                best = c;
-            }
-        }
-        if (best != null) {
-            Rect r = new Rect();
-            best.getBoundsInScreen(r);
-            log("  📍 选中候选: bounds=(" + r.left + "," + r.top + "-" + r.right + "," + r.bottom + "), class="
-                + (best.getClassName() != null ? best.getClassName().toString() : "?")
-                + ", text=" + (best.getText() != null ? best.getText().toString().substring(0, Math.min(30, best.getText().length())) : "N/A")
-                + ", score=" + bestScore);
-        }
-        return best;
-    }
-
-    private void collectCaptionCandidates(AccessibilityNodeInfo node, int minY,
-                                          java.util.List<AccessibilityNodeInfo> out) {
-        if (node == null) return;
-        Rect rect = new Rect();
-        node.getBoundsInScreen(rect);
-        if (rect.bottom > minY && node.isClickable()) {
-            out.add(node);
-        }
-        for (int i = 0; i < node.getChildCount(); i++) {
-            collectCaptionCandidates(node.getChild(i), minY, out);
-        }
-    }
-
-    // 检测是否已打开详情页（出现了评论/点赞数/回复等 UI 元素）
-    private boolean isDetailPageOpen() {
-        AccessibilityNodeInfo root = getRoot();
-        if (root == null) return false;
-        StringBuilder sb = new StringBuilder();
-        collectText(root, sb);
-        String text = sb.toString();
-        // Instagram 详情页特征文字
-        return text.contains("评论") || text.contains("Comment")
-            || text.contains("回复") || text.contains("Reply")
-            || text.contains("次赞") || text.contains("likes")
-            || text.contains("查看") || text.contains("view");
-    }
-
-    // 检测是否误入了个人主页
-    private boolean isOnProfilePage() {
-        AccessibilityNodeInfo root = getRoot();
-        if (root == null) return false;
-        StringBuilder sb = new StringBuilder();
-        collectText(root, sb);
-        String text = sb.toString();
-        // 主页特征：有「帖子」「粉丝」「正在关注」、有「编辑主页」或「分享主页」
-        boolean hasPosts = text.contains("帖子") || text.contains("posts") || text.contains("貼文");
-        boolean hasFollowers = text.contains("粉丝") || text.contains("followers") || text.contains("粉絲");
-        boolean hasFollowing = text.contains("正在关注") || text.contains("following") || text.contains("追蹤中");
-        boolean hasEditOrShare = text.contains("编辑主页") || text.contains("edit profile")
-                              || text.contains("分享主页") || text.contains("share profile")
-                              || text.contains("編輯個人資料");
-        return (hasPosts && hasFollowers && hasFollowing) || hasEditOrShare;
-    }
-
-    // 检测是否在首页 Feed（非 Reels）
-    // ⭐ 主判断：底部导航栏 Home tab 的选中状态。这是最可靠的指标。
-    // ⭐ 次判断：页面内容结构（Reels 有全屏视频 + 右侧互动按钮，首页有帖子列表 + 时间戳）
-    private boolean isOnHomeFeed() {
-        AccessibilityNodeInfo root = getRoot();
-        if (root == null) return false;
-        String pkg = root.getPackageName() != null ? root.getPackageName().toString() : "";
-        if (!pkg.contains("instagram")) return false;
-
-        // 主判断：底部导航栏 Home tab 是否是选中的
-        // Instagram 底部 5 个 tab：[首页, Reels, 新建, 消息, 个人]
-        // 当前在哪个 tab 哪个 tab 的节点 isSelected() 为 true
-        AccessibilityNodeInfo homeTab = findBottomNavTab(0); // 第 0 个 = 首页
-        if (homeTab != null && homeTab.isSelected()) {
-            return true; // 首页 tab 处于选中态 → 确认在首页
-        }
-
-        // 次判断：Reels tab 是选中的 → 确认在 Reels
-        AccessibilityNodeInfo reelsTab = findBottomNavTab(1); // 第 1 个 = Reels
-        if (reelsTab != null && reelsTab.isSelected()) {
-            return false; // Reels tab 处于选中态 → 不在首页
-        }
-
-        // 兜底：用页面内容结构判断
-        StringBuilder sb = new StringBuilder();
-        collectText(root, sb);
-        String text = sb.toString();
-
-        // Reels 内容特征（较保守）
-        boolean hasCommentInput = text.contains("添加评论") || text.contains("Add a comment")
-                               || text.contains("發表評論");
-        boolean hasReelsSideButtons = findLikeButton() != null;
-        if (hasCommentInput && hasReelsSideButtons) {
-            return false; // Reels 内容确认 → 不在首页
-        }
-
-        // 首页内容特征：帖子时间戳
-        boolean hasTimestamps = text.contains("小时前") || text.contains("分钟前")
-                             || text.contains("天前") || text.contains("ago");
-        if (hasTimestamps && !hasCommentInput) {
-            return true; // 有帖子时间戳 + 无 Reels 特征 → 首页
-        }
-
-        // 完全不确定 → 保守判断为不在首页（宁可错过恢复也不错误恢复）
-        return false;
-    }
-
-    // 在底部导航栏中按索引找 tab 节点（0=首页, 1=Reels, 2=新建, 3=消息, 4=个人）
-    // 返回的是可点击的 tab 节点，可用于 isSelected() 检查或 performAction(CLICK)
-    private AccessibilityNodeInfo findBottomNavTab(int index) {
-        AccessibilityNodeInfo root = getRoot();
-        if (root == null) return null;
-        int navTopY = (int)(screenH * 0.92); // 导航栏大约在屏幕底部 8%
-
-        // 收集底部区域所有可点击节点
-        java.util.List<AccessibilityNodeInfo> tabs = new java.util.ArrayList<>();
-        collectBottomClickables(root, navTopY, tabs);
-
-        // 按 x 坐标排序（从左到右）
-        java.util.Collections.sort(tabs, (a, b) -> {
-            Rect ra = new Rect(), rb = new Rect();
-            a.getBoundsInScreen(ra); b.getBoundsInScreen(rb);
-            return Integer.compare(ra.left, rb.left);
-        });
-
-        // 去重：合并 x 坐标接近的节点（相邻 30px 内的算同一个 tab），保留面积大的
-        java.util.List<AccessibilityNodeInfo> uniqueTabs = new java.util.ArrayList<>();
-        for (AccessibilityNodeInfo t : tabs) {
-            Rect rt = new Rect();
-            t.getBoundsInScreen(rt);
-            boolean merged = false;
-            for (int j = 0; j < uniqueTabs.size(); j++) {
-                Rect ru = new Rect();
-                uniqueTabs.get(j).getBoundsInScreen(ru);
-                if (Math.abs(rt.left - ru.left) < 30) {
-                    merged = true;
-                    // 保留面积更大的
-                    if ((rt.right - rt.left) * (rt.bottom - rt.top) >
-                        (ru.right - ru.left) * (ru.bottom - ru.top)) {
-                        uniqueTabs.set(j, t);
-                    }
-                    break;
-                }
-            }
-            if (!merged) uniqueTabs.add(t);
-        }
-
-        if (uniqueTabs.size() >= 5 && index < uniqueTabs.size()) {
-            return uniqueTabs.get(index);
-        }
-        return null;
-    }
-
-    private void collectBottomClickables(AccessibilityNodeInfo node, int minY,
-                                         java.util.List<AccessibilityNodeInfo> out) {
-        if (node == null) return;
-        Rect rect = new Rect();
-        node.getBoundsInScreen(rect);
-        if (rect.top > minY && node.isClickable()) {
-            out.add(node);
-        }
-        for (int i = 0; i < node.getChildCount(); i++) {
-            collectBottomClickables(node.getChild(i), minY, out);
-        }
-    }
-
-    // 检测是否误入了话题标签页
-    private boolean isOnHashTagPage() {
-        AccessibilityNodeInfo root = getRoot();
-        if (root == null) return false;
-        StringBuilder sb = new StringBuilder();
-        collectText(root, sb);
-        String text = sb.toString();
-        // 话题页特征：大量 ## 开头文字、关注/取消关注话题按钮
-        int hashCount = 0;
-        for (String word : text.split("\\s+")) {
-            if (word.startsWith("#")) hashCount++;
-        }
-        boolean hasFollowTopic = text.contains("关注话题") || text.contains("追蹤話題")
-                              || text.contains("Follow") || text.contains("follow");
-        return (hashCount >= 3 && hasFollowTopic);
-    }
-
-    // 安全关闭详情页 + 确保回到 Reels
-    // 从详情页返回时，Instagram 可能回到 Reels 也可能回到某个中间页面。
-    // 必须验证返回后的位置，不在 Reels 就强制导航回去。
-    private void dismissDetail() {
-        pressBack();
-        sleep(500);
-
-        // 检查是否成功回到 Reels 界面
-        if (isDetailPageOpen() || isOnHashTagPage()) {
-            // back 没关掉详情（可能在 IGTV/其他特殊页面），点视频区域强制返回
-            log("  ↩️ back 未关闭详情，点击视频区域返回");
-            int vx = screenW / 2 + randInt(-30, 30);
-            int vy = (int)(screenH * 0.32) + randInt(-20, 20);
-            clickXY(vx, vy);
-            sleep(800);
-        }
-
-        // 关键：确认回到 Reels，否则主动导航
-        sleep(300);
-        if (isOnHomeFeed()) {
-            log("  ↩️ 回到首页而非 Reels，主动导航");
-            navigateToReels();
-        } else if (isOnProfilePage()) {
-            log("  ↩️ 回到个人主页，back + 导航 Reels");
-            pressBack();
-            sleep(600);
-            if (isOnHomeFeed()) navigateToReels();
-        }
-    }
-
-    // 关闭可能弹出来的 overlay 菜单（不感兴趣/举报 等）
-    private void dismissOverlayMenu() {
-        // 尝试找 "取消" "关闭" "Cancel" "Close" 按钮
-        AccessibilityNodeInfo cancelBtn = findNodeByTextContains("取消");
-        if (cancelBtn == null) cancelBtn = findNodeByTextContains("Cancel");
-        if (cancelBtn == null) cancelBtn = findNodeByTextContains("Close");
-        if (cancelBtn != null) {
-            cancelBtn.performAction(AccessibilityNodeInfo.ACTION_CLICK);
-            sleep(400);
-            return;
-        }
-        // 兜底：按 back 关闭 overlay
-        pressBack();
-        sleep(400);
-    }
-
-    // ============ 在详情页检测关键词 ============
-    // 打开详情后，整页文字更全（完整描述 + 标签 + 评论）
-
-    private String detectKeywordInDetail() {
-        AccessibilityNodeInfo root = getRoot();
-        if (root == null) return null;
-
-        StringBuilder sb = new StringBuilder();
-        collectText(root, sb);
-        String pageText = normalizeText(sb.toString());
-
-        // 调试日志：显示前 300 字符
-        String preview = pageText.length() > 300 ? pageText.substring(0, 300) + "..." : pageText;
-        log("  🔍 详情文字: " + preview.replace('\n', ' '));
-
-        for (String kw : keywords) {
-            String k = normalizeText(kw.trim());
-            if (k.isEmpty()) continue;
-            if (pageText.contains(k)) {
-                return kw.trim();
-            }
-        }
-        return null;
     }
 
     // ============ Instagram 基础操作 ============
@@ -606,54 +152,23 @@ public class NurtureService extends AccessibilityService {
     private void navigateToReels() {
         log("🎬 导航到 Reels...");
 
-        // 方案1：通过底部导航栏索引点 Reels tab（第 1 个 = Reels）
-        AccessibilityNodeInfo reelsTab = findBottomNavTab(1);
-        if (reelsTab != null) {
-            log("  🎬 通过底部 NavBar[1] 点击 Reels");
-            reelsTab.performAction(AccessibilityNodeInfo.ACTION_CLICK);
-            sleep(randInt(2500, 3500));
-            if (!isOnHomeFeed()) {
-                log("  ✅ 已进入 Reels");
-                return;
-            }
-            log("  ⚠️ NavBar 点击未生效");
-        }
-
-        // 方案2：findByDesc("Reels") — 即使中文界面 desc 通常也是 "Reels"
+        // 方案1：findByDesc("Reels") — 最可靠
         AccessibilityNodeInfo reelsIcon = findByDesc("Reels");
         if (reelsIcon != null) {
             log("  🎬 通过 findByDesc('Reels') 点击");
             reelsIcon.performAction(AccessibilityNodeInfo.ACTION_CLICK);
             sleep(randInt(2500, 3500));
-            if (!isOnHomeFeed()) {
-                log("  ✅ 已进入 Reels");
-                return;
-            }
+            log("  ✅ 已点击 Reels");
+            return;
         }
 
-        // 方案3：坐标兜底 — Reels tab 在底部导航栏第 2 个位置
-        int rx = (int)(screenW * 0.30) + randInt(-10, 10);
+        // 方案2：坐标兜底 — Reels tab 在底部导航栏第 2 个位置（约 x=20%）
+        int rx = (int)(screenW * 0.20) + randInt(-10, 10);
         int ry = (int)(screenH * 0.955) + randInt(-5, 5);
         log("  🎬 坐标点击 Reels tab (" + rx + ", " + ry + ")");
         clickXY(rx, ry);
         sleep(randInt(2500, 3500));
-        if (!isOnHomeFeed()) {
-            log("  ✅ 坐标点击成功进入 Reels");
-            return;
-        }
-
-        // 方案4：坐标重试（微调位置）
-        log("  ⚠️ 仍失败，尝试 x=28% 位置");
-        rx = (int)(screenW * 0.28) + randInt(-8, 8);
-        ry = (int)(screenH * 0.97) + randInt(-3, 3);
-        clickXY(rx, ry);
-        sleep(randInt(2500, 3500));
-        if (!isOnHomeFeed()) {
-            log("  ✅ 坐标重试成功");
-            return;
-        }
-
-        log("  ❌ 所有导航方案失败");
+        log("  ✅ 坐标点击完成");
     }
 
     private boolean isInInstagram() {
@@ -661,109 +176,6 @@ public class NurtureService extends AccessibilityService {
         if (root == null) return false;
         String pkg = root.getPackageName() != null ? root.getPackageName().toString() : "";
         return pkg.contains("instagram");
-    }
-
-    // ============ 广告检测 ============
-
-    private boolean isReelsAd() {
-        AccessibilityNodeInfo root = getRoot();
-        if (root == null) return false;
-        StringBuilder sb = new StringBuilder();
-        collectText(root, sb);
-        String text = sb.toString().toLowerCase();
-        // 广告特征词：官方广告标识 + 常见微商/代购广告文案
-        String[] adMarkers = {
-            // Instagram 官方广告标识
-            "sponsored", "推广", "赞助商", "sponsor", "广告",
-            // 广告 CTA 按钮
-            "learn more", "了解更多", "shop now", "立即购买", "get offer",
-            "立即申请", "install now", "立即注册", "立即下载", "查看详情",
-            // 微商/代购常见广告文案（截图中出现的）
-            "购买微信", "加微信", "微信", "wechat", "投广告", "广告合作",
-            "代理", "招代理", "批发", "一件代发", "工厂直销", "厂家直销",
-            "价格私聊", "私聊", "私信", "询价", "报价", "优惠价格",
-            "扫码", "二维码", "qrcode", "扫码加", "扫码联系",
-            "2026新款", "陆续出货", "现货", "预定", "预订",
-            // 其他广告特征
-            "限时优惠", "限时折扣", "特价", "清仓", "秒杀", "抢购"
-        };
-        for (String m : adMarkers) {
-            if (text.contains(m)) {
-                log("  🚫 广告标识: " + m);
-                return true;
-            }
-        }
-        return false;
-    }
-
-    // ============ 点赞 ============
-
-    private static final String[] LIKE_DESCS = {"Like", "喜欢", "赞"};
-    private static final String[] UNLIKE_DESCS = {"Unlike", "已赞", "取消赞"};
-
-    private void likeReels() {
-        log("  ❤️ 点赞...");
-        sleep(400);
-
-        // 优先用 Accessibility 节点点击（最准确，不依赖坐标）
-        AccessibilityNodeInfo btn = findLikeButton();
-        if (btn != null) {
-            boolean ok = btn.performAction(AccessibilityNodeInfo.ACTION_CLICK);
-            sleep(500);
-            if (ok) {
-                // 验证
-                if (findUnlikeButton() != null) {
-                    log("  ✅ 点赞成功");
-                } else {
-                    log("  ⚠️ 点赞未确认");
-                }
-            } else {
-                // performAction 失败时用坐标兜底
-                Rect rect = new Rect();
-                btn.getBoundsInScreen(rect);
-                clickXY(rect.centerX(), rect.centerY());
-                sleep(500);
-                log("  ↩️ 坐标兜底点击");
-            }
-            return;
-        }
-        log("  ⚠️ 找不到 Like 按钮，跳过点赞");
-    }
-
-    private AccessibilityNodeInfo findLikeButton() {
-        return findLikeButtonRecursive(getRoot());
-    }
-
-    private AccessibilityNodeInfo findLikeButtonRecursive(AccessibilityNodeInfo node) {
-        if (node == null) return null;
-        CharSequence desc = node.getContentDescription();
-        if (desc != null) {
-            String d = desc.toString().trim();
-            for (String s : LIKE_DESCS) { if (d.equals(s)) return node; }
-        }
-        for (int i = 0; i < node.getChildCount(); i++) {
-            AccessibilityNodeInfo r = findLikeButtonRecursive(node.getChild(i));
-            if (r != null) return r;
-        }
-        return null;
-    }
-
-    private AccessibilityNodeInfo findUnlikeButton() {
-        return findUnlikeButtonRecursive(getRoot());
-    }
-
-    private AccessibilityNodeInfo findUnlikeButtonRecursive(AccessibilityNodeInfo node) {
-        if (node == null) return null;
-        CharSequence desc = node.getContentDescription();
-        if (desc != null) {
-            String d = desc.toString().trim();
-            for (String s : UNLIKE_DESCS) { if (d.equals(s)) return node; }
-        }
-        for (int i = 0; i < node.getChildCount(); i++) {
-            AccessibilityNodeInfo r = findUnlikeButtonRecursive(node.getChild(i));
-            if (r != null) return r;
-        }
-        return null;
     }
 
     // ============ UI 查找工具 ============
