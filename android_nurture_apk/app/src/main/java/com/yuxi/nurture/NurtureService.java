@@ -1,6 +1,6 @@
 package com.yuxi.nurture;
 
-// v4.4: 广告词扩充+首页/Reels检测重写+循环开始恢复检查
+// v4.5: isOnHomeFeed用底部NavBar tab选中态+navigateToReels三方案+dismissDetail后验证恢复
 
 import android.accessibilityservice.AccessibilityService;
 import android.accessibilityservice.GestureDescription;
@@ -73,20 +73,19 @@ public class NurtureService extends AccessibilityService {
                 reelIndex++;
                 log("--- Reel #" + reelIndex + " ---");
 
-                // 0. 每次循环开始先确认在 Reels 里，不在则恢复
-                if (isOnHomeFeed()) {
-                    log("  ⚠️ 检测到在首页，重新进入 Reels");
+                // 0. 强制确认在 Reels 里（每次循环必检查）
+                if (isOnHomeFeed() || isOnProfilePage()) {
+                    log("  ⚠️ 偏移检测：不在 Reels，执行恢复");
+                    if (isOnProfilePage()) {
+                        pressBack();
+                        sleep(800);
+                    }
                     navigateToReels();
                     sleep(randInt(1500, 2500));
-                }
-                if (isOnProfilePage()) {
-                    log("  ⚠️ 检测到在个人主页，pressBack 返回");
-                    pressBack();
-                    sleep(800);
-                    // back 后可能在首页，再检测一次
+                    // 恢复后跳过本轮（页面可能还没稳定）
                     if (isOnHomeFeed()) {
-                        navigateToReels();
-                        sleep(randInt(1500, 2500));
+                        log("  ⚠️ 恢复失败，跳过本轮");
+                        continue;
                     }
                 }
 
@@ -152,14 +151,10 @@ public class NurtureService extends AccessibilityService {
 
                 // 每 5 轮检查一次是否离开 IG
                 if (reelIndex % 5 == 0 && !isInInstagram()) {
-                    log("  ⚠️ 离开 IG，尝试返回并重进 Reels");
+                    log("  ⚠️ 离开 IG，尝试返回");
                     pressBack();
                     sleep(800);
                     navigateToReels();
-                }
-                // 每 8 轮校验一次 Reels tab
-                if (reelIndex % 8 == 0) {
-                    revalidateReelsTab();
                 }
             }
 
@@ -377,40 +372,109 @@ public class NurtureService extends AccessibilityService {
     }
 
     // 检测是否在首页 Feed（非 Reels）
-    // ⚠️ 不能依赖 "Reels" 文字（中文界面没有），必须用页面结构判断
+    // ⭐ 主判断：底部导航栏 Home tab 的选中状态。这是最可靠的指标。
+    // ⭐ 次判断：页面内容结构（Reels 有全屏视频 + 右侧互动按钮，首页有帖子列表 + 时间戳）
     private boolean isOnHomeFeed() {
         AccessibilityNodeInfo root = getRoot();
         if (root == null) return false;
         String pkg = root.getPackageName() != null ? root.getPackageName().toString() : "";
         if (!pkg.contains("instagram")) return false;
 
+        // 主判断：底部导航栏 Home tab 是否是选中的
+        // Instagram 底部 5 个 tab：[首页, Reels, 新建, 消息, 个人]
+        // 当前在哪个 tab 哪个 tab 的节点 isSelected() 为 true
+        AccessibilityNodeInfo homeTab = findBottomNavTab(0); // 第 0 个 = 首页
+        if (homeTab != null && homeTab.isSelected()) {
+            return true; // 首页 tab 处于选中态 → 确认在首页
+        }
+
+        // 次判断：Reels tab 是选中的 → 确认在 Reels
+        AccessibilityNodeInfo reelsTab = findBottomNavTab(1); // 第 1 个 = Reels
+        if (reelsTab != null && reelsTab.isSelected()) {
+            return false; // Reels tab 处于选中态 → 不在首页
+        }
+
+        // 兜底：用页面内容结构判断
         StringBuilder sb = new StringBuilder();
         collectText(root, sb);
         String text = sb.toString();
 
-        // Reels 全屏特征（中文界面）：
-        // 1. 有"添加评论..."输入框（Reels 底部固定有评论输入框）
-        // 2. 右侧有赞/评论/分享按钮列（Reels 右侧垂直排列）
+        // Reels 内容特征（较保守）
         boolean hasCommentInput = text.contains("添加评论") || text.contains("Add a comment")
-                               || text.contains("發表評論") || text.contains("评论");
-        boolean hasReelsRightButtons = findLikeButton() != null; // 右侧有 Like 按钮
-
-        boolean isReelsMode = hasCommentInput && hasReelsRightButtons;
-
-        // 首页特征：有帖子列表（多个帖子头部如 "用户名 • 5月14日"）
-        // 或者底部导航栏"首页"处于 active 状态
-        boolean hasHomeActive = false;
-        AccessibilityNodeInfo homeTab = findNodeByTextContains("首页");
-        if (homeTab == null) homeTab = findNodeByTextContains("主頁");
-        if (homeTab == null) homeTab = findNodeByTextContains("Home");
-        if (homeTab != null) {
-            hasHomeActive = homeTab.isSelected() || homeTab.isFocused();
+                               || text.contains("發表評論");
+        boolean hasReelsSideButtons = findLikeButton() != null;
+        if (hasCommentInput && hasReelsSideButtons) {
+            return false; // Reels 内容确认 → 不在首页
         }
 
-        // 首页 Feed 有多个帖子，通常能看到日期格式如 "5月14日" "May 14"
-        boolean hasFeedDateMarkers = text.contains("月") && (text.contains("日") || text.contains("小时前"));
+        // 首页内容特征：帖子时间戳
+        boolean hasTimestamps = text.contains("小时前") || text.contains("分钟前")
+                             || text.contains("天前") || text.contains("ago");
+        if (hasTimestamps && !hasCommentInput) {
+            return true; // 有帖子时间戳 + 无 Reels 特征 → 首页
+        }
 
-        return (!isReelsMode && hasHomeActive) || (!isReelsMode && hasFeedDateMarkers);
+        // 完全不确定 → 保守判断为不在首页（宁可错过恢复也不错误恢复）
+        return false;
+    }
+
+    // 在底部导航栏中按索引找 tab 节点（0=首页, 1=Reels, 2=新建, 3=消息, 4=个人）
+    // 返回的是可点击的 tab 节点，可用于 isSelected() 检查或 performAction(CLICK)
+    private AccessibilityNodeInfo findBottomNavTab(int index) {
+        AccessibilityNodeInfo root = getRoot();
+        if (root == null) return null;
+        int navTopY = (int)(screenH * 0.92); // 导航栏大约在屏幕底部 8%
+
+        // 收集底部区域所有可点击节点
+        java.util.List<AccessibilityNodeInfo> tabs = new java.util.ArrayList<>();
+        collectBottomClickables(root, navTopY, tabs);
+
+        // 按 x 坐标排序（从左到右）
+        java.util.Collections.sort(tabs, (a, b) -> {
+            Rect ra = new Rect(), rb = new Rect();
+            a.getBoundsInScreen(ra); b.getBoundsInScreen(rb);
+            return Integer.compare(ra.left, rb.left);
+        });
+
+        // 去重：合并 x 坐标接近的节点（相邻 30px 内的算同一个 tab），保留面积大的
+        java.util.List<AccessibilityNodeInfo> uniqueTabs = new java.util.ArrayList<>();
+        for (AccessibilityNodeInfo t : tabs) {
+            Rect rt = new Rect();
+            t.getBoundsInScreen(rt);
+            boolean merged = false;
+            for (int j = 0; j < uniqueTabs.size(); j++) {
+                Rect ru = new Rect();
+                uniqueTabs.get(j).getBoundsInScreen(ru);
+                if (Math.abs(rt.left - ru.left) < 30) {
+                    merged = true;
+                    // 保留面积更大的
+                    if ((rt.right - rt.left) * (rt.bottom - rt.top) >
+                        (ru.right - ru.left) * (ru.bottom - ru.top)) {
+                        uniqueTabs.set(j, t);
+                    }
+                    break;
+                }
+            }
+            if (!merged) uniqueTabs.add(t);
+        }
+
+        if (uniqueTabs.size() >= 5 && index < uniqueTabs.size()) {
+            return uniqueTabs.get(index);
+        }
+        return null;
+    }
+
+    private void collectBottomClickables(AccessibilityNodeInfo node, int minY,
+                                         java.util.List<AccessibilityNodeInfo> out) {
+        if (node == null) return;
+        Rect rect = new Rect();
+        node.getBoundsInScreen(rect);
+        if (rect.top > minY && node.isClickable()) {
+            out.add(node);
+        }
+        for (int i = 0; i < node.getChildCount(); i++) {
+            collectBottomClickables(node.getChild(i), minY, out);
+        }
     }
 
     // 检测是否误入了话题标签页
@@ -430,19 +494,33 @@ public class NurtureService extends AccessibilityService {
         return (hashCount >= 3 && hasFollowTopic);
     }
 
-    // 安全关闭详情页（含话题页误入的情况）
-    // 策略：先 pressBack → 如果还在详情/话题页 → 点击视频区域返回
+    // 安全关闭详情页 + 确保回到 Reels
+    // 从详情页返回时，Instagram 可能回到 Reels 也可能回到某个中间页面。
+    // 必须验证返回后的位置，不在 Reels 就强制导航回去。
     private void dismissDetail() {
         pressBack();
         sleep(500);
 
         // 检查是否成功回到 Reels 界面
         if (isDetailPageOpen() || isOnHashTagPage()) {
+            // back 没关掉详情（可能在 IGTV/其他特殊页面），点视频区域强制返回
             log("  ↩️ back 未关闭详情，点击视频区域返回");
             int vx = screenW / 2 + randInt(-30, 30);
             int vy = (int)(screenH * 0.32) + randInt(-20, 20);
             clickXY(vx, vy);
+            sleep(800);
+        }
+
+        // 关键：确认回到 Reels，否则主动导航
+        sleep(300);
+        if (isOnHomeFeed()) {
+            log("  ↩️ 回到首页而非 Reels，主动导航");
+            navigateToReels();
+        } else if (isOnProfilePage()) {
+            log("  ↩️ 回到个人主页，back + 导航 Reels");
+            pressBack();
             sleep(600);
+            if (isOnHomeFeed()) navigateToReels();
         }
     }
 
@@ -527,38 +605,55 @@ public class NurtureService extends AccessibilityService {
 
     private void navigateToReels() {
         log("🎬 导航到 Reels...");
-        // 底部导航栏从左到右：首页(0~20%) | Reels(20~40%) | 新建(40~60%) | 消息(60~80%) | 我的(80~100%)
-        // 先尝试找 Reels tab 节点（多种语言）
-        AccessibilityNodeInfo reelsIcon = findByDesc("Reels");
-        if (reelsIcon == null) reelsIcon = findByDesc("Reels");
-        if (reelsIcon == null) reelsIcon = findNodeByTextContains("Reels");
-        if (reelsIcon != null) {
-            reelsIcon.performAction(AccessibilityNodeInfo.ACTION_CLICK);
-        } else {
-            // 坐标兜底：点底部导航栏第二个图标（Reels 位置约 x=28%~32%）
-            int rx = (int)(screenW * 0.30) + randInt(-10, 10);
-            int ry = (int)(screenH * 0.955) + randInt(-5, 5);
-            log("  🎬 坐标点击 Reels tab (" + rx + ", " + ry + ")");
-            clickXY(rx, ry);
-        }
-        sleep(randInt(2500, 3500));
 
-        // 确认是否成功进入 Reels，如果没成功再试一次
-        if (isOnHomeFeed()) {
-            log("  ⚠️ 仍在首页，再次尝试进入 Reels");
-            int rx = (int)(screenW * 0.30) + randInt(-15, 15);
-            int ry = (int)(screenH * 0.955) + randInt(-5, 5);
-            clickXY(rx, ry);
+        // 方案1：通过底部导航栏索引点 Reels tab（第 1 个 = Reels）
+        AccessibilityNodeInfo reelsTab = findBottomNavTab(1);
+        if (reelsTab != null) {
+            log("  🎬 通过底部 NavBar[1] 点击 Reels");
+            reelsTab.performAction(AccessibilityNodeInfo.ACTION_CLICK);
             sleep(randInt(2500, 3500));
+            if (!isOnHomeFeed()) {
+                log("  ✅ 已进入 Reels");
+                return;
+            }
+            log("  ⚠️ NavBar 点击未生效");
         }
-    }
 
-    // 确认当前仍在 Reels tab，不在则重新进入
-    private void revalidateReelsTab() {
-        if (isOnHomeFeed()) {
-            log("  🔄 检测到在首页 Feed，重新进入 Reels");
-            navigateToReels();
+        // 方案2：findByDesc("Reels") — 即使中文界面 desc 通常也是 "Reels"
+        AccessibilityNodeInfo reelsIcon = findByDesc("Reels");
+        if (reelsIcon != null) {
+            log("  🎬 通过 findByDesc('Reels') 点击");
+            reelsIcon.performAction(AccessibilityNodeInfo.ACTION_CLICK);
+            sleep(randInt(2500, 3500));
+            if (!isOnHomeFeed()) {
+                log("  ✅ 已进入 Reels");
+                return;
+            }
         }
+
+        // 方案3：坐标兜底 — Reels tab 在底部导航栏第 2 个位置
+        int rx = (int)(screenW * 0.30) + randInt(-10, 10);
+        int ry = (int)(screenH * 0.955) + randInt(-5, 5);
+        log("  🎬 坐标点击 Reels tab (" + rx + ", " + ry + ")");
+        clickXY(rx, ry);
+        sleep(randInt(2500, 3500));
+        if (!isOnHomeFeed()) {
+            log("  ✅ 坐标点击成功进入 Reels");
+            return;
+        }
+
+        // 方案4：坐标重试（微调位置）
+        log("  ⚠️ 仍失败，尝试 x=28% 位置");
+        rx = (int)(screenW * 0.28) + randInt(-8, 8);
+        ry = (int)(screenH * 0.97) + randInt(-3, 3);
+        clickXY(rx, ry);
+        sleep(randInt(2500, 3500));
+        if (!isOnHomeFeed()) {
+            log("  ✅ 坐标重试成功");
+            return;
+        }
+
+        log("  ❌ 所有导航方案失败");
     }
 
     private boolean isInInstagram() {
