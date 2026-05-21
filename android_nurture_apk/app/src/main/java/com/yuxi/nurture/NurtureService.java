@@ -1,6 +1,6 @@
 package com.yuxi.nurture;
 
-// v4.3: 排除作者节点+主页检测+Reels恢复
+// v4.4: 广告词扩充+首页/Reels检测重写+循环开始恢复检查
 
 import android.accessibilityservice.AccessibilityService;
 import android.accessibilityservice.GestureDescription;
@@ -73,6 +73,23 @@ public class NurtureService extends AccessibilityService {
                 reelIndex++;
                 log("--- Reel #" + reelIndex + " ---");
 
+                // 0. 每次循环开始先确认在 Reels 里，不在则恢复
+                if (isOnHomeFeed()) {
+                    log("  ⚠️ 检测到在首页，重新进入 Reels");
+                    navigateToReels();
+                    sleep(randInt(1500, 2500));
+                }
+                if (isOnProfilePage()) {
+                    log("  ⚠️ 检测到在个人主页，pressBack 返回");
+                    pressBack();
+                    sleep(800);
+                    // back 后可能在首页，再检测一次
+                    if (isOnHomeFeed()) {
+                        navigateToReels();
+                        sleep(randInt(1500, 2500));
+                    }
+                }
+
                 // 1. 先检测广告，是广告直接划走
                 if (isReelsAd()) {
                     adCount++;
@@ -91,6 +108,16 @@ public class NurtureService extends AccessibilityService {
                 // 3. 点开底部描述栏（标题那一行）
                 boolean opened = openReelDescription();
                 if (opened) {
+                    // 3.5 再次检测广告（有些广告在详情页才会露出广告文案如"购买微信"）
+                    if (isReelsAd()) {
+                        adCount++;
+                        log("  🚫 详情页检测到广告，关闭并划走");
+                        dismissDetail();
+                        swipeUp();
+                        sleep(randInt(1500, 2500));
+                        continue;
+                    }
+
                     // 4. 在详情页检测关键词
                     sleep(1000); // 等详情内容完全渲染
                     String matchedKw = detectKeywordInDetail();
@@ -115,7 +142,7 @@ public class NurtureService extends AccessibilityService {
                         dismissDetail();
                     }
                 } else {
-                    // 没找到描述栏 / 误入话题页，直接划走
+                    // 没找到描述栏 / 误入话题页/主页，直接划走
                     log("  ⏭️ 未打开详情，划走");
                 }
 
@@ -123,19 +150,15 @@ public class NurtureService extends AccessibilityService {
                 swipeUp();
                 sleep(randInt(1500, 2500));
 
-                // 每次 swipe 后检查是否还在 Reels，不在则恢复
-                if (isOnHomeFeed()) {
-                    log("  ⚠️ 检测到在首页，重新进入 Reels");
-                    navigateToReels();
-                    sleep(randInt(1500, 2500));
-                } else if (reelIndex % 5 == 0 && !isInInstagram()) {
+                // 每 5 轮检查一次是否离开 IG
+                if (reelIndex % 5 == 0 && !isInInstagram()) {
                     log("  ⚠️ 离开 IG，尝试返回并重进 Reels");
                     pressBack();
                     sleep(800);
                     navigateToReels();
                 }
-                // 偶尔检查 Reels tab 是否还 active（防止被导航到其他 tab）
-                if (reelIndex % 12 == 0) {
+                // 每 8 轮校验一次 Reels tab
+                if (reelIndex % 8 == 0) {
                     revalidateReelsTab();
                 }
             }
@@ -354,28 +377,40 @@ public class NurtureService extends AccessibilityService {
     }
 
     // 检测是否在首页 Feed（非 Reels）
+    // ⚠️ 不能依赖 "Reels" 文字（中文界面没有），必须用页面结构判断
     private boolean isOnHomeFeed() {
         AccessibilityNodeInfo root = getRoot();
         if (root == null) return false;
-        // 首页特征：底部有"首页"按钮高亮 + 上面是贴文列表（不是全屏视频）
-        // 简单判断：没有 fullscreen Reels 特征 + 有"首页"相关节点
-        // 更可靠：找是否有 Reels 标识；没有 Reels 标识但有"首页"=在首页
         String pkg = root.getPackageName() != null ? root.getPackageName().toString() : "";
         if (!pkg.contains("instagram")) return false;
 
-        // 检测是否有 Reels 全屏特征文字
         StringBuilder sb = new StringBuilder();
         collectText(root, sb);
         String text = sb.toString();
-        boolean isReelsMode = text.contains("Reels") || text.contains("reels");
+
+        // Reels 全屏特征（中文界面）：
+        // 1. 有"添加评论..."输入框（Reels 底部固定有评论输入框）
+        // 2. 右侧有赞/评论/分享按钮列（Reels 右侧垂直排列）
+        boolean hasCommentInput = text.contains("添加评论") || text.contains("Add a comment")
+                               || text.contains("發表評論") || text.contains("评论");
+        boolean hasReelsRightButtons = findLikeButton() != null; // 右侧有 Like 按钮
+
+        boolean isReelsMode = hasCommentInput && hasReelsRightButtons;
+
+        // 首页特征：有帖子列表（多个帖子头部如 "用户名 • 5月14日"）
+        // 或者底部导航栏"首页"处于 active 状态
         boolean hasHomeActive = false;
-        // 找底部导航栏"首页"是否处于 active 状态
         AccessibilityNodeInfo homeTab = findNodeByTextContains("首页");
         if (homeTab == null) homeTab = findNodeByTextContains("主頁");
+        if (homeTab == null) homeTab = findNodeByTextContains("Home");
         if (homeTab != null) {
             hasHomeActive = homeTab.isSelected() || homeTab.isFocused();
         }
-        return !isReelsMode && hasHomeActive;
+
+        // 首页 Feed 有多个帖子，通常能看到日期格式如 "5月14日" "May 14"
+        boolean hasFeedDateMarkers = text.contains("月") && (text.contains("日") || text.contains("小时前"));
+
+        return (!isReelsMode && hasHomeActive) || (!isReelsMode && hasFeedDateMarkers);
     }
 
     // 检测是否误入了话题标签页
@@ -492,26 +527,36 @@ public class NurtureService extends AccessibilityService {
 
     private void navigateToReels() {
         log("🎬 导航到 Reels...");
+        // 底部导航栏从左到右：首页(0~20%) | Reels(20~40%) | 新建(40~60%) | 消息(60~80%) | 我的(80~100%)
+        // 先尝试找 Reels tab 节点（多种语言）
         AccessibilityNodeInfo reelsIcon = findByDesc("Reels");
+        if (reelsIcon == null) reelsIcon = findByDesc("Reels");
+        if (reelsIcon == null) reelsIcon = findNodeByTextContains("Reels");
         if (reelsIcon != null) {
             reelsIcon.performAction(AccessibilityNodeInfo.ACTION_CLICK);
         } else {
-            smartTap((int)(screenW * 0.30), (int)(screenH * 0.95), "Reels兜底");
+            // 坐标兜底：点底部导航栏第二个图标（Reels 位置约 x=28%~32%）
+            int rx = (int)(screenW * 0.30) + randInt(-10, 10);
+            int ry = (int)(screenH * 0.955) + randInt(-5, 5);
+            log("  🎬 坐标点击 Reels tab (" + rx + ", " + ry + ")");
+            clickXY(rx, ry);
         }
         sleep(randInt(2500, 3500));
+
+        // 确认是否成功进入 Reels，如果没成功再试一次
+        if (isOnHomeFeed()) {
+            log("  ⚠️ 仍在首页，再次尝试进入 Reels");
+            int rx = (int)(screenW * 0.30) + randInt(-15, 15);
+            int ry = (int)(screenH * 0.955) + randInt(-5, 5);
+            clickXY(rx, ry);
+            sleep(randInt(2500, 3500));
+        }
     }
 
     // 确认当前仍在 Reels tab，不在则重新进入
     private void revalidateReelsTab() {
-        AccessibilityNodeInfo root = getRoot();
-        if (root == null) return;
-        StringBuilder sb = new StringBuilder();
-        collectText(root, sb);
-        String text = sb.toString();
-        // 如果收集的文字中找不到任何 Reels 特征且不在详情页，可能跑偏了
-        boolean inReels = text.contains("Reels") || text.contains("reels") || isDetailPageOpen();
-        if (!inReels && isInInstagram()) {
-            log("  🔄 Reels tab 丢失，重新进入");
+        if (isOnHomeFeed()) {
+            log("  🔄 检测到在首页 Feed，重新进入 Reels");
             navigateToReels();
         }
     }
@@ -531,9 +576,22 @@ public class NurtureService extends AccessibilityService {
         StringBuilder sb = new StringBuilder();
         collectText(root, sb);
         String text = sb.toString().toLowerCase();
-        // 广告特征词（注意：要求出现专属广告标识，不能用太泛的词）
-        String[] adMarkers = {"sponsored", "推广", "赞助商", "learn more", "了解更多",
-                              "shop now", "立即购买", "get offer", "立即申请", "install now"};
+        // 广告特征词：官方广告标识 + 常见微商/代购广告文案
+        String[] adMarkers = {
+            // Instagram 官方广告标识
+            "sponsored", "推广", "赞助商", "sponsor", "广告",
+            // 广告 CTA 按钮
+            "learn more", "了解更多", "shop now", "立即购买", "get offer",
+            "立即申请", "install now", "立即注册", "立即下载", "查看详情",
+            // 微商/代购常见广告文案（截图中出现的）
+            "购买微信", "加微信", "微信", "wechat", "投广告", "广告合作",
+            "代理", "招代理", "批发", "一件代发", "工厂直销", "厂家直销",
+            "价格私聊", "私聊", "私信", "询价", "报价", "优惠价格",
+            "扫码", "二维码", "qrcode", "扫码加", "扫码联系",
+            "2026新款", "陆续出货", "现货", "预定", "预订",
+            // 其他广告特征
+            "限时优惠", "限时折扣", "特价", "清仓", "秒杀", "抢购"
+        };
         for (String m : adMarkers) {
             if (text.contains(m)) {
                 log("  🚫 广告标识: " + m);
