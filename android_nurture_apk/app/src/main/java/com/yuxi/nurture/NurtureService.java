@@ -90,19 +90,17 @@ public class NurtureService extends AccessibilityService {
                 boolean opened = openReelDescription();
                 if (opened) {
                     // 4. 在详情页检测关键词
-                    sleep(800); // 等详情内容渲染
+                    sleep(1000); // 等详情内容完全渲染
                     String matchedKw = detectKeywordInDetail();
                     if (matchedKw != null) {
-                        // 5. 命中关键词：点赞（按用户设定概率）
+                        // 5. 命中关键词：关详情 → 点赞（按用户设定概率）
                         log("  🎯 命中关键词 [" + matchedKw + "]");
+                        dismissDetail();
                         if (random.nextInt(100) < likeProb) {
-                            pressBack(); // 先关掉详情
-                            sleep(500);
                             likeReels();
                             likedCount++;
                         } else {
-                            pressBack();
-                            sleep(500);
+                            log("  🎲 概率跳过点赞");
                         }
                         // 命中了多看一会再划走
                         watchedCount++;
@@ -112,12 +110,11 @@ public class NurtureService extends AccessibilityService {
                     } else {
                         // 没命中：关掉详情，直接划走
                         log("  ⏭️ 无关键词，关闭详情划走");
-                        pressBack();
-                        sleep(300);
+                        dismissDetail();
                     }
                 } else {
-                    // 没找到描述栏（部分视频没有描述），直接划走
-                    log("  ⏭️ 未找到描述栏，划走");
+                    // 没找到描述栏 / 误入话题页，直接划走
+                    log("  ⏭️ 未打开详情，划走");
                 }
 
                 // 6. 上划切换下一个
@@ -154,39 +151,190 @@ public class NurtureService extends AccessibilityService {
     }
 
     // ============ 点开底部描述栏 ============
-    // Reels 底部描述区域：标题文字 + "..." 展开按钮
-    // 策略：找 "更多"/"more" 按钮，或者直接点底部文字区域
+    // ⚠️ 严禁找 "更多"/"more" 文本 — Reels 右上 overflow 菜单也有 "更多" 文字，
+    //    点下去会弹出「不感兴趣/举报」，导致完全错误的行为。
+    //
+    // 正确策略：找 Reels 底部描述区域的 clickable 节点（含作者名+标题文字），
+    //           或者用坐标直接点底部左侧的标题区域。
 
     private boolean openReelDescription() {
-        // 方案1：找 "更多" / "more" / "..." 展开按钮
-        AccessibilityNodeInfo moreBtn = findNodeByTextContains("更多");
-        if (moreBtn == null) moreBtn = findNodeByTextContains("more");
-        if (moreBtn == null) moreBtn = findNodeByTextContains("...");
-        if (moreBtn != null) {
-            log("  📖 点开 [更多] 展开描述");
-            moreBtn.performAction(AccessibilityNodeInfo.ACTION_CLICK);
-            sleep(600);
-            return true;
+        AccessibilityNodeInfo root = getRoot();
+        if (root == null) return false;
+
+        // 方案1：精确定位底部描述区的 clickable 节点
+        AccessibilityNodeInfo captionNode = findBottomCaptionNode(root);
+        if (captionNode != null) {
+            log("  📖 点击底部描述节点");
+            captionNode.performAction(AccessibilityNodeInfo.ACTION_CLICK);
+            sleep(800);
+            if (isDetailPageOpen()) {
+                log("  ✅ 详情已打开（节点点击）");
+                return true;
+            }
+            // 如果点击了但没打开详情（可能弹出了别的菜单），先 dismiss
+            log("  ⚠️ 节点点击未打开详情，尝试 dismiss 后坐标兜底");
+            dismissOverlayMenu();
         }
 
-        // 方案2：直接点底部文字区域（描述行大约在屏幕 y=88%~93%，左侧）
-        // 这个位置是视频底部作者名+描述那行
-        int tx = (int)(screenW * 0.40) + randInt(-20, 20);
-        int ty = (int)(screenH * 0.90) + randInt(-20, 20);
-        log("  📖 找不到 [更多]，尝试点底部描述区域 (" + tx + ", " + ty + ")");
+        // 方案2：坐标点击底部左侧描述文字区域
+        // 选左侧（x=10%~35%）避免点到右侧互动按钮，选偏下（y=87%~93%）对准标题行
+        // 不能点太右（会点到赞/评论/分享按钮），不能点太左（有些设备有导航栏）
+        int tx = (int)(screenW * 0.18) + randInt(-15, 15);
+        int ty = (int)(screenH * 0.90) + randInt(-10, 10);
+        log("  📖 坐标点击底部描述区 (" + tx + ", " + ty + ")");
         clickXY(tx, ty);
         sleep(800);
 
-        // 检测是否打开了详情（页面结构变化：出现评论/更多文字）
-        AccessibilityNodeInfo check = findNodeByTextContains("1次赞");
-        if (check == null) check = findNodeByTextContains("likes");
-        if (check == null) check = findNodeByTextContains("评论");
-        if (check != null) {
-            log("  ✅ 详情已打开");
+        if (isDetailPageOpen()) {
+            log("  ✅ 详情已打开（坐标点击）");
             return true;
         }
-        log("  ⚠️ 详情未确认打开");
-        return true; // 还是返回 true，后面会做关键词检测
+
+        // 如果点到了话题标签（跳转到了话题页），按 back 返回
+        if (isOnHashTagPage()) {
+            log("  ⚠️ 误入话题页，按 back 返回");
+            pressBack();
+            sleep(500);
+            return false; // 这次算了，直接划走
+        }
+
+        log("  ⚠️ 详情未打开（坐标点击失败）");
+        return false;
+    }
+
+    // 在可见树中寻找底部 20% 区域内的 clickable 节点（描述行）
+    private AccessibilityNodeInfo findBottomCaptionNode(AccessibilityNodeInfo node) {
+        if (node == null) return null;
+        int bottomMinY = (int)(screenH * 0.80);
+
+        // BFS 收集所有在底部区域的 clickable 节点
+        java.util.List<AccessibilityNodeInfo> candidates = new java.util.ArrayList<>();
+        collectCaptionCandidates(node, bottomMinY, candidates);
+
+        if (candidates.isEmpty()) {
+            log("  ⚠️ 底部区域未找到候选节点");
+            return null;
+        }
+
+        // 优先级：
+        // 1. 在左侧（x < 65%屏幕宽）且不含 "音频" "音乐" "Audio" "原声"
+        // 2. text 非空优先于 desc 非空
+        // 3. 面积不要太大（排除整个底部 bar）
+        AccessibilityNodeInfo best = null;
+        int bestScore = -1;
+        for (AccessibilityNodeInfo c : candidates) {
+            Rect r = new Rect();
+            c.getBoundsInScreen(r);
+            int area = (r.right - r.left) * (r.bottom - r.top);
+
+            // 排除音频节点
+            CharSequence cd = c.getContentDescription();
+            String cdStr = cd != null ? cd.toString().toLowerCase() : "";
+            if (cdStr.contains("音频") || cdStr.contains("audio") ||
+                cdStr.contains("原声") || cdStr.contains("original") ||
+                cdStr.contains("音乐") || cdStr.contains("music")) {
+                continue;
+            }
+
+            int score = 0;
+            // 左侧加分
+            if (r.left < screenW * 0.65) score += 10;
+            // text 优先
+            CharSequence txt = c.getText();
+            if (txt != null && txt.length() > 0) score += 5;
+            // 面积不能太大（整个底部栏 > 30% 屏幕面积）也不能太小
+            int maxArea = (int)(screenW * screenH * 0.20);
+            if (area > 100 && area < maxArea) score += 2;
+            // 越靠近底部越优先
+            if (r.top > screenH * 0.86) score += 3;
+
+            if (score > bestScore) {
+                bestScore = score;
+                best = c;
+            }
+        }
+        if (best != null) {
+            Rect r = new Rect();
+            best.getBoundsInScreen(r);
+            log("  📍 选中候选: bounds=(" + r.left + "," + r.top + "-" + r.right + "," + r.bottom + "), score=" + bestScore);
+        }
+        return best;
+    }
+
+    private void collectCaptionCandidates(AccessibilityNodeInfo node, int minY,
+                                          java.util.List<AccessibilityNodeInfo> out) {
+        if (node == null) return;
+        Rect rect = new Rect();
+        node.getBoundsInScreen(rect);
+        if (rect.bottom > minY && node.isClickable()) {
+            out.add(node);
+        }
+        for (int i = 0; i < node.getChildCount(); i++) {
+            collectCaptionCandidates(node.getChild(i), minY, out);
+        }
+    }
+
+    // 检测是否已打开详情页（出现了评论/点赞数/回复等 UI 元素）
+    private boolean isDetailPageOpen() {
+        AccessibilityNodeInfo root = getRoot();
+        if (root == null) return false;
+        StringBuilder sb = new StringBuilder();
+        collectText(root, sb);
+        String text = sb.toString();
+        // Instagram 详情页特征文字
+        return text.contains("评论") || text.contains("Comment")
+            || text.contains("回复") || text.contains("Reply")
+            || text.contains("次赞") || text.contains("likes")
+            || text.contains("查看") || text.contains("view");
+    }
+
+    // 检测是否误入了话题标签页
+    private boolean isOnHashTagPage() {
+        AccessibilityNodeInfo root = getRoot();
+        if (root == null) return false;
+        StringBuilder sb = new StringBuilder();
+        collectText(root, sb);
+        String text = sb.toString();
+        // 话题页特征：大量 ## 开头文字、关注/取消关注话题按钮
+        int hashCount = 0;
+        for (String word : text.split("\\s+")) {
+            if (word.startsWith("#")) hashCount++;
+        }
+        boolean hasFollowTopic = text.contains("关注话题") || text.contains("追蹤話題")
+                              || text.contains("Follow") || text.contains("follow");
+        return (hashCount >= 3 && hasFollowTopic);
+    }
+
+    // 安全关闭详情页（含话题页误入的情况）
+    // 策略：先 pressBack → 如果还在详情/话题页 → 点击视频区域返回
+    private void dismissDetail() {
+        pressBack();
+        sleep(500);
+
+        // 检查是否成功回到 Reels 界面
+        if (isDetailPageOpen() || isOnHashTagPage()) {
+            log("  ↩️ back 未关闭详情，点击视频区域返回");
+            int vx = screenW / 2 + randInt(-30, 30);
+            int vy = (int)(screenH * 0.32) + randInt(-20, 20);
+            clickXY(vx, vy);
+            sleep(600);
+        }
+    }
+
+    // 关闭可能弹出来的 overlay 菜单（不感兴趣/举报 等）
+    private void dismissOverlayMenu() {
+        // 尝试找 "取消" "关闭" "Cancel" "Close" 按钮
+        AccessibilityNodeInfo cancelBtn = findNodeByTextContains("取消");
+        if (cancelBtn == null) cancelBtn = findNodeByTextContains("Cancel");
+        if (cancelBtn == null) cancelBtn = findNodeByTextContains("Close");
+        if (cancelBtn != null) {
+            cancelBtn.performAction(AccessibilityNodeInfo.ACTION_CLICK);
+            sleep(400);
+            return;
+        }
+        // 兜底：按 back 关闭 overlay
+        pressBack();
+        sleep(400);
     }
 
     // ============ 在详情页检测关键词 ============
