@@ -1,5 +1,7 @@
 package com.yuxi.nurture;
 
+// v4.3: 排除作者节点+主页检测+Reels恢复
+
 import android.accessibilityservice.AccessibilityService;
 import android.accessibilityservice.GestureDescription;
 import android.content.Intent;
