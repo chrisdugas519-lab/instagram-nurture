@@ -377,6 +377,9 @@ public class NurtureService extends AccessibilityService {
         }
         return !isReelsMode && hasHomeActive;
     }
+
+    // 检测是否误入了话题标签页
+    private boolean isOnHashTagPage() {
         AccessibilityNodeInfo root = getRoot();
         if (root == null) return false;
         StringBuilder sb = new StringBuilder();
